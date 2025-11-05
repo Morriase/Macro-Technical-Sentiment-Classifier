@@ -140,6 +140,10 @@ class ForexClassifierPipeline:
             # For Kaggle, use M5 data directly or resample as needed
             self.df_price = df_m5  # Can resample if needed
 
+            # Skip quality validation and macro events on Kaggle (no API access)
+            logger.info("✓ Data loaded successfully from Kaggle dataset")
+            self.df_events = None  # No macro events on Kaggle
+
         else:
             # Fetch FX price data from OANDA
             logger.info(f"Fetching FX data for {self.currency_pair}")
@@ -155,25 +159,28 @@ class ForexClassifierPipeline:
 
             # Validate quality
             quality = self.fx_data.validate_data_quality(self.df_price)
-        logger.info(
-            f"Price data quality score: {quality['quality_score']:.2%}")
+            logger.info(
+                f"Price data quality score: {quality['quality_score']:.2%}")
 
-        # Fetch macroeconomic events
-        logger.info("Fetching macroeconomic events")
-        self.df_events = self.macro_data.get_events_for_currency_pair(
-            pair=self.currency_pair,
-            start_date=start_date,
-            end_date=end_date,
-        )
+            # Fetch macroeconomic events
+            logger.info("Fetching macroeconomic events")
+            self.df_events = self.macro_data.get_events_for_currency_pair(
+                pair=self.currency_pair,
+                start_date=start_date,
+                end_date=end_date,
+            )
 
         # Save data
         if save:
             self.fx_data.save_data(self.df_price, self.currency_pair, "4H")
-            if not self.df_events.empty:
+            if self.df_events is not None and not self.df_events.empty:
                 self.macro_data.save_events(self.df_events, self.currency_pair)
 
         logger.info(f"Fetched {len(self.df_price)} price bars")
-        logger.info(f"Fetched {len(self.df_events)} macro events")
+        if self.df_events is not None:
+            logger.info(f"Fetched {len(self.df_events)} macro events")
+        else:
+            logger.info("No macro events (Kaggle mode)")
 
     def engineer_features(self):
         """
@@ -194,7 +201,7 @@ class ForexClassifierPipeline:
             self.df_features)
 
         # Macro features (temporal proximity)
-        if not self.df_events.empty:
+        if self.df_events is not None and not self.df_events.empty:
             logger.info("Calculating macro proximity features")
             self.df_features = self.macro_data.calculate_temporal_proximity(
                 events_df=self.df_events,
