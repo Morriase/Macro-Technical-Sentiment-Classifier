@@ -24,7 +24,7 @@ gensim>=4.3.0
 optuna>=3.3.0
 
 # Financial Data APIs
-oandapyV20>=0.7.2
+MetaTrader5>=5.0.4500  # FREE FX data (worldwide access)
 finnhub-python>=2.4.18
 
 # Data Visualization
