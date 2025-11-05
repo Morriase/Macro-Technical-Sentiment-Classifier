@@ -1,19 +1,34 @@
 """
 Configuration settings for the Macro-Technical Sentiment Forex Classifier
 """
+import torch
 import os
 from pathlib import Path
 
 # Project Paths
 PROJECT_ROOT = Path(__file__).parent.parent
-DATA_DIR = PROJECT_ROOT / "data"
-MODELS_DIR = PROJECT_ROOT / "models"
-LOGS_DIR = PROJECT_ROOT / "logs"
-RESULTS_DIR = PROJECT_ROOT / "results"
 
-# Create directories if they don't exist
-for directory in [DATA_DIR, MODELS_DIR, LOGS_DIR, RESULTS_DIR]:
+# Detect if running on Kaggle
+IS_KAGGLE = os.path.exists('/kaggle/input')
+
+if IS_KAGGLE:
+    # Kaggle paths
+    DATA_DIR = Path("/kaggle/input/training-dataset-for-sentiment")
+    MODELS_DIR = Path("/kaggle/working/models")
+    LOGS_DIR = Path("/kaggle/working/logs")
+    RESULTS_DIR = Path("/kaggle/working/results")
+else:
+    # Local paths
+    DATA_DIR = PROJECT_ROOT / "data"
+    MODELS_DIR = PROJECT_ROOT / "models"
+    LOGS_DIR = PROJECT_ROOT / "logs"
+    RESULTS_DIR = PROJECT_ROOT / "results"
+
+# Create directories if they don't exist (except input data on Kaggle)
+for directory in [MODELS_DIR, LOGS_DIR, RESULTS_DIR]:
     directory.mkdir(parents=True, exist_ok=True)
+if not IS_KAGGLE:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 # API Keys (Load from environment variables)
 OANDA_API_KEY = os.getenv("OANDA_API_KEY", "")
@@ -176,6 +191,29 @@ MONITORING_CONFIG = {
 # Logging Configuration
 LOG_LEVEL = "INFO"
 LOG_FORMAT = "{time:YYYY-MM-DD HH:mm:ss} | {level} | {module}:{function}:{line} | {message}"
+
+# GPU/CUDA Configuration
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+USE_CUDA = torch.cuda.is_available()
+CUDA_DEVICE_COUNT = torch.cuda.device_count() if USE_CUDA else 0
+
+# GPU Optimization Settings
+GPU_CONFIG = {
+    "device": DEVICE,
+    "use_cuda": USE_CUDA,
+    "num_workers": 4 if IS_KAGGLE else 2,  # DataLoader workers
+    "pin_memory": USE_CUDA,  # Pin memory for faster GPU transfer
+    # Use AMP (Automatic Mixed Precision) for faster training
+    "mixed_precision": USE_CUDA,
+    "cudnn_benchmark": USE_CUDA,  # Enable cuDNN auto-tuner
+    # Effective batch size multiplier
+    "gradient_accumulation_steps": 4 if IS_KAGGLE else 1,
+}
+
+# Set cuDNN optimization flags
+if USE_CUDA:
+    torch.backends.cudnn.benchmark = True
+    torch.backends.cudnn.deterministic = False  # Trade determinism for speed
 
 # Class Imbalance Handling
 IMBALANCE_CONFIG = {

@@ -1,8 +1,10 @@
 """
 LSTM Sequence Model for Temporal Pattern Recognition
 Designed for financial time series with strong temporal dependencies
+Optimized for GPU/CUDA training on Kaggle
 """
-from src.config import ENSEMBLE_CONFIG
+from torch.cuda.amp import autocast, GradScaler
+from src.config import ENSEMBLE_CONFIG, GPU_CONFIG, DEVICE, USE_CUDA
 from sklearn.preprocessing import MinMaxScaler
 from loguru import logger
 from typing import Tuple, Optional, List
@@ -18,6 +20,8 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
+
+# Enable Automatic Mixed Precision (AMP) for faster GPU training
 
 
 class LSTMSequenceClassifier(nn.Module):
@@ -163,10 +167,9 @@ class LSTMSequenceModel:
         self.epochs = epochs
         self.early_stopping_patience = early_stopping_patience
 
-        # Device
+        # Device - use config or auto-detect
         if device is None:
-            self.device = torch.device(
-                "cuda" if torch.cuda.is_available() else "cpu")
+            self.device = DEVICE
         else:
             self.device = torch.device(device)
 
@@ -179,13 +182,26 @@ class LSTMSequenceModel:
             dropout=dropout,
         ).to(self.device)
 
+        # Mixed precision training (for faster GPU training)
+        self.use_amp = GPU_CONFIG['mixed_precision']
+        self.scaler_amp = GradScaler() if self.use_amp else None
+
+        # Gradient accumulation for larger effective batch size
+        self.gradient_accumulation_steps = GPU_CONFIG['gradient_accumulation_steps']
+
         # Scaler for feature normalization
         self.scaler = MinMaxScaler(feature_range=(0, 1))
         self.is_fitted = False
 
         logger.info(f"LSTM model initialized on {self.device}")
         logger.info(
+            f"CUDA available: {USE_CUDA}, Mixed Precision: {self.use_amp}")
+        logger.info(
             f"Model parameters: {sum(p.numel() for p in self.model.parameters()):,}")
+        if USE_CUDA:
+            logger.info(f"GPU: {torch.cuda.get_device_name(0)}")
+            logger.info(
+                f"CUDA Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
 
     def prepare_sequences(
         self, X: np.ndarray, y: Optional[np.ndarray] = None
@@ -271,24 +287,42 @@ class LSTMSequenceModel:
             self.model.train()
             total_loss = 0
 
-            # Mini-batch training
+            # Mini-batch training with gradient accumulation
             indices = torch.randperm(len(X_train_tensor))
+            optimizer.zero_grad()
 
-            for i in range(0, len(indices), self.batch_size):
+            for batch_idx, i in enumerate(range(0, len(indices), self.batch_size)):
                 batch_indices = indices[i:i + self.batch_size]
                 X_batch = X_train_tensor[batch_indices]
                 y_batch = y_train_tensor[batch_indices]
 
-                # Forward pass
-                optimizer.zero_grad()
-                outputs = self.model(X_batch)
-                loss = criterion(outputs, y_batch)
+                # Forward pass with mixed precision
+                if self.use_amp:
+                    with autocast():
+                        outputs = self.model(X_batch)
+                        loss = criterion(outputs, y_batch)
+                    # Scale loss for gradient accumulation
+                    loss = loss / self.gradient_accumulation_steps
+                    # Backward pass with scaled gradients
+                    self.scaler_amp.scale(loss).backward()
 
-                # Backward pass
-                loss.backward()
-                optimizer.step()
+                    # Update weights after accumulating gradients
+                    if (batch_idx + 1) % self.gradient_accumulation_steps == 0:
+                        self.scaler_amp.step(optimizer)
+                        self.scaler_amp.update()
+                        optimizer.zero_grad()
+                else:
+                    # Standard training without AMP
+                    outputs = self.model(X_batch)
+                    loss = criterion(outputs, y_batch)
+                    loss = loss / self.gradient_accumulation_steps
+                    loss.backward()
 
-                total_loss += loss.item()
+                    if (batch_idx + 1) % self.gradient_accumulation_steps == 0:
+                        optimizer.step()
+                        optimizer.zero_grad()
+
+                total_loss += loss.item() * self.gradient_accumulation_steps
 
             avg_loss = total_loss / (len(indices) / self.batch_size)
 
