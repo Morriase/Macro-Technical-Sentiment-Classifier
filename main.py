@@ -7,9 +7,17 @@ from src.validation.walk_forward import WalkForwardOptimizer
 from src.models.hybrid_ensemble import HybridEnsemble
 from src.feature_engineering.sentiment_features import SentimentAnalyzer
 from src.feature_engineering.technical_features import TechnicalFeatureEngineer
-from src.data_acquisition.macro_data import MacroDataAcquisition
-from src.data_acquisition.fx_data import FXDataAcquisition
 from src.data_acquisition.kaggle_loader import KaggleFXDataLoader
+
+# Optional imports for local environment (not needed on Kaggle)
+try:
+    from src.data_acquisition.macro_data import MacroDataAcquisition
+    from src.data_acquisition.fx_data import FXDataAcquisition
+    HAS_API_SOURCES = True
+except ImportError:
+    HAS_API_SOURCES = False
+    MacroDataAcquisition = None
+    FXDataAcquisition = None
 from src.config import (
     CURRENCY_PAIRS,
     PRIMARY_PAIR,
@@ -76,8 +84,16 @@ class ForexClassifierPipeline:
         # Initialize data sources
         if use_kaggle_data:
             self.kaggle_loader = KaggleFXDataLoader()
+            self.fx_data = None
+            self.macro_data = None
             logger.info("Using Kaggle dataset")
         else:
+            if not HAS_API_SOURCES:
+                raise ImportError(
+                    "API data sources (OANDA, Finnhub) not available. "
+                    "Install required packages or use Kaggle dataset."
+                )
+            self.kaggle_loader = None
             self.fx_data = FXDataAcquisition()
             self.macro_data = MacroDataAcquisition()
             logger.info("Using OANDA/API data sources")
