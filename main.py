@@ -4,7 +4,7 @@ End-to-end training and prediction workflow
 Optimized for both local and Kaggle (GPU/CUDA) environments
 """
 from src.validation.walk_forward import WalkForwardOptimizer
-from src.models.hybrid_ensemble import HybridStackingEnsemble
+from src.models.hybrid_ensemble import HybridEnsemble
 from src.feature_engineering.sentiment_features import SentimentAnalyzer
 from src.feature_engineering.technical_features import TechnicalFeatureEngineer
 from src.data_acquisition.macro_data import MacroDataAcquisition
@@ -292,7 +292,7 @@ class ForexClassifierPipeline:
         if use_walk_forward:
             # Walk-Forward Optimization
             optimizer = WalkForwardOptimizer(
-                model_class=HybridStackingEnsemble,
+                model_class=HybridEnsemble,
             )
 
             results = optimizer.run_walk_forward_optimization(
@@ -321,7 +321,7 @@ class ForexClassifierPipeline:
             X_train = self.df_features[feature_cols].values[:train_size]
             y_train = self.df_features["target_class"].values[:train_size]
 
-            self.model = HybridStackingEnsemble()
+            self.model = HybridEnsemble()
             self.model.fit(X_train, y_train)
 
         # Save model
