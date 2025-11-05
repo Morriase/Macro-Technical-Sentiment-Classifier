@@ -24,9 +24,10 @@ class KaggleFXDataLoader:
         self.data_dir = Path(data_dir)
 
         if IS_KAGGLE:
-            # On Kaggle, new dataset structure: /kaggle/input/macros-and-ohlc/
-            self.fx_data_dir = self.data_dir / "fx_data"
-            self.macro_events_dir = self.data_dir / "macro_events"
+            # On Kaggle, dataset has 'data' subdirectory: /kaggle/input/macros-and-ohlc/data/
+            self.fx_data_dir = self.data_dir / "data" / "kaggle_dataset" / "fx_data"
+            self.macro_events_dir = self.data_dir / \
+                "data" / "kaggle_dataset" / "macro_events"
         else:
             # Local structure
             self.fx_data_dir = self.data_dir / "kaggle_dataset" / "fx_data"
