@@ -50,6 +50,22 @@ class KaggleFXDataLoader:
         filepath = self.fx_data_dir / filename
 
         if not filepath.exists():
+            # List available files to help debug
+            logger.error(f"Data file not found: {filepath}")
+            logger.info(f"Checking directory: {self.fx_data_dir}")
+            
+            if self.fx_data_dir.exists():
+                available_files = list(self.fx_data_dir.glob("*.parquet"))
+                logger.info(f"Available parquet files ({len(available_files)}):")
+                for f in available_files[:10]:  # Show first 10
+                    logger.info(f"  - {f.name}")
+            else:
+                logger.error(f"Directory does not exist: {self.fx_data_dir}")
+                # Check parent directory
+                parent = self.fx_data_dir.parent
+                if parent.exists():
+                    logger.info(f"Parent directory contents: {list(parent.iterdir())}")
+            
             raise FileNotFoundError(f"Data file not found: {filepath}")
 
         logger.info(f"Loading {symbol} data from {filepath}")
