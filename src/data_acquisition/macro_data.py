@@ -1,6 +1,7 @@
 """
 Macroeconomic event data acquisition module
 Fetches high-impact economic calendar events and calculates surprise factors
+Uses TradingView's free economic calendar API
 """
 import pandas as pd
 import numpy as np
@@ -8,10 +9,8 @@ from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Tuple
 import requests
 from loguru import logger
-import finnhub
 
 from src.config import (
-    FINNHUB_API_KEY,
     HIGH_IMPACT_EVENTS,
     DATA_DIR,
 )
@@ -19,24 +18,16 @@ from src.config import (
 
 class MacroDataAcquisition:
     """
-    Acquisition and processing of macroeconomic calendar events
+    Acquisition and processing of macroeconomic calendar events from TradingView
     Calculates surprise factors and temporal proximity features
     """
 
-    def __init__(self, api_key: str = FINNHUB_API_KEY):
-        """
-        Initialize macro data acquisition client
-
-        Args:
-            api_key: Finnhub API key
-        """
-        self.api_key = api_key
-        self.client = None
-
-        if self.api_key:
-            self.client = finnhub.Client(api_key=api_key)
-        else:
-            logger.warning("No Finnhub API key provided. Using demo mode.")
+    def __init__(self):
+        """Initialize macro data acquisition client"""
+        self.base_url = 'https://economic-calendar.tradingview.com/events'
+        self.headers = {'Origin': 'https://in.tradingview.com'}
+        logger.info(
+            "MacroDataAcquisition initialized with TradingView calendar API")
 
     def fetch_economic_calendar(
         self,
@@ -45,61 +36,78 @@ class MacroDataAcquisition:
         country: str = "US",
     ) -> pd.DataFrame:
         """
-        Fetch economic calendar events from Finnhub
+        Fetch economic calendar events from TradingView (FREE API)
 
         Args:
             start_date: Start date
             end_date: End date
-            country: Country code ('US', 'GB', 'EU', 'JP')
+            country: Country code ('US', 'GB', 'EU', 'JP', 'CH', 'AU', 'CA', 'NZ')
 
         Returns:
             DataFrame with economic events
         """
-        if not self.client:
-            raise ValueError(
-                "Finnhub client not initialized. Provide API key.")
-
         logger.info(
-            f"Fetching economic calendar for {country} from {start_date} to {end_date}")
+            f"Fetching economic calendar for {country} from {start_date.date()} to {end_date.date()}")
 
         try:
-            # Finnhub API call
-            events = self.client.economic_calendar(
-                _from=start_date.strftime("%Y-%m-%d"),
-                to=end_date.strftime("%Y-%m-%d"),
-                country=country,
-            )
+            # TradingView API call
+            payload = {
+                'from': start_date.strftime('%Y-%m-%dT%H:%M:%S.000Z'),
+                'to': end_date.strftime('%Y-%m-%dT%H:%M:%S.000Z'),
+                'countries': country,
+                # High importance only (1=low, 2=medium, 3=high)
+                'minImportance': 3
+            }
 
-            if not events or "economicCalendar" not in events:
+            response = requests.get(
+                self.base_url, headers=self.headers, params=payload, timeout=30)
+
+            if response.status_code != 200:
+                logger.error(
+                    f"API returned status code {response.status_code}")
+                return pd.DataFrame()
+
+            data = response.json()
+
+            if 'result' not in data or not data['result']:
                 logger.warning(f"No events found for {country}")
                 return pd.DataFrame()
 
             # Parse events
-            df = pd.DataFrame(events["economicCalendar"])
+            df = pd.DataFrame(data['result'])
 
             if df.empty:
                 return df
 
             # Parse timestamp
-            df["timestamp"] = pd.to_datetime(df["time"], unit="s")
+            df['date'] = pd.to_datetime(df['date'], unit='s')
 
             # Standardize column names
-            df.rename(columns={
-                "event": "event_name",
-                "actual": "actual_value",
-                "estimate": "consensus_forecast",
-                "prev": "previous_value",
-                "impact": "impact_level",
-            }, inplace=True)
+            df = df.rename(columns={
+                'title': 'event_name',
+                'actual': 'actual_value',
+                'forecast': 'consensus_forecast',
+                'previous': 'previous_value',
+                'importance': 'impact_level',
+            })
 
-            # Filter high-impact events only
-            if "impact_level" in df.columns:
-                df = df[df["impact_level"].isin(["high", "3"])].copy()
+            # Calculate surprise factor
+            if 'actual_value' in df.columns and 'consensus_forecast' in df.columns:
+                df['surprise_factor'] = (
+                    (df['actual_value'] - df['consensus_forecast']) /
+                    (df['consensus_forecast'].abs() + 0.01)
+                ).fillna(0)
+            else:
+                df['surprise_factor'] = 0
 
-            logger.info(f"Fetched {len(df)} high-impact events for {country}")
+            logger.success(
+                f"Fetched {len(df)} high-impact events for {country}")
 
             return df
 
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Network error fetching economic calendar: {e}")
+            return pd.DataFrame()
         except Exception as e:
             logger.error(f"Error fetching economic calendar: {e}")
             return pd.DataFrame()

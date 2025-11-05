@@ -4,9 +4,13 @@ Configuration settings for the Macro-Technical Sentiment Forex Classifier
 import torch
 import os
 from pathlib import Path
+from dotenv import load_dotenv
 
 # Project Paths
 PROJECT_ROOT = Path(__file__).parent.parent
+
+# Load environment variables from .env file
+load_dotenv(PROJECT_ROOT / ".env")
 
 # Detect if running on Kaggle
 IS_KAGGLE = os.path.exists('/kaggle/input')
