@@ -24,8 +24,8 @@ class KaggleFXDataLoader:
         self.data_dir = Path(data_dir)
 
         if IS_KAGGLE:
-            # On Kaggle, data is in /kaggle/input/training-dataset-for-sentiment/fx_data/
-            self.fx_data_dir = self.data_dir / "fx_data"
+            # On Kaggle, uploaded dataset structure: /kaggle/input/training-dataset-for-sentiment/data/kaggle_dataset/fx_data/
+            self.fx_data_dir = self.data_dir / "data" / "kaggle_dataset" / "fx_data"
         else:
             # Local: data/kaggle_dataset/fx_data/
             self.fx_data_dir = self.data_dir / "kaggle_dataset" / "fx_data"
