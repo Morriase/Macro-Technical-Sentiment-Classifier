@@ -85,7 +85,8 @@ class ForexClassifierPipeline:
         if use_kaggle_data:
             self.kaggle_loader = KaggleFXDataLoader()
             self.fx_data = None
-            self.macro_data = None
+            # Create MacroDataAcquisition for feature calculations (doesn't need API)
+            self.macro_data = MacroDataAcquisition() if (HAS_API_SOURCES and MacroDataAcquisition) else None
             logger.info("Using Kaggle dataset")
         else:
             if not HAS_API_SOURCES:
@@ -209,14 +210,14 @@ class ForexClassifierPipeline:
             self.df_features)
 
         # Macro features (temporal proximity)
-        if self.df_events is not None and not self.df_events.empty:
+        if self.df_events is not None and not self.df_events.empty and self.macro_data:
             logger.info("Calculating macro proximity features")
             self.df_features = self.macro_data.calculate_temporal_proximity(
                 events_df=self.df_events,
                 price_df=self.df_features,
             )
         else:
-            logger.warning("No macro events available")
+            logger.warning("No macro events available or macro_data not initialized")
             self.df_features["tau_pre"] = 0.0
             self.df_features["tau_post"] = 0.0
             self.df_features["weighted_surprise"] = 0.0
