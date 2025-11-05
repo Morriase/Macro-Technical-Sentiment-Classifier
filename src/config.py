@@ -16,8 +16,8 @@ load_dotenv(PROJECT_ROOT / ".env")
 IS_KAGGLE = os.path.exists('/kaggle/input')
 
 if IS_KAGGLE:
-    # Kaggle paths
-    DATA_DIR = Path("/kaggle/input/training-dataset-for-sentiment")
+    # Kaggle paths - updated dataset location
+    DATA_DIR = Path("/kaggle/input/macros-and-ohlc")
     MODELS_DIR = Path("/kaggle/working/models")
     LOGS_DIR = Path("/kaggle/working/logs")
     RESULTS_DIR = Path("/kaggle/working/results")
