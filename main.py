@@ -177,10 +177,11 @@ class ForexClassifierPipeline:
                 end_date=end_date,
             )
 
-        # Save data
-        if save:
-            self.fx_data.save_data(self.df_price, self.currency_pair, "4H")
-            if self.df_events is not None and not self.df_events.empty:
+        # Save data (skip on Kaggle - data is read-only)
+        if save and not self.use_kaggle_data:
+            if self.fx_data:
+                self.fx_data.save_data(self.df_price, self.currency_pair, "4H")
+            if self.df_events is not None and not self.df_events.empty and self.macro_data:
                 self.macro_data.save_events(self.df_events, self.currency_pair)
 
         logger.info(f"Fetched {len(self.df_price)} price bars")
