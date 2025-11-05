@@ -1,6 +1,7 @@
 """
 Main Pipeline for Macro-Technical Sentiment Forex Classifier
 End-to-end training and prediction workflow
+Optimized for both local and Kaggle (GPU/CUDA) environments
 """
 from src.validation.walk_forward import WalkForwardOptimizer
 from src.models.hybrid_ensemble import HybridStackingEnsemble
@@ -8,6 +9,7 @@ from src.feature_engineering.sentiment_features import SentimentAnalyzer
 from src.feature_engineering.technical_features import TechnicalFeatureEngineer
 from src.data_acquisition.macro_data import MacroDataAcquisition
 from src.data_acquisition.fx_data import FXDataAcquisition
+from src.data_acquisition.kaggle_loader import KaggleFXDataLoader
 from src.config import (
     CURRENCY_PAIRS,
     PRIMARY_PAIR,
@@ -17,6 +19,9 @@ from src.config import (
     RESULTS_DIR,
     LOG_LEVEL,
     LOG_FORMAT,
+    IS_KAGGLE,
+    USE_CUDA,
+    DEVICE,
 )
 import pandas as pd
 import numpy as np
@@ -39,6 +44,17 @@ logger.add(
     rotation="100 MB",
 )
 
+# Log environment info
+if IS_KAGGLE:
+    logger.info("Running on Kaggle")
+    if USE_CUDA:
+        import torch
+        logger.info(f"GPU: {torch.cuda.get_device_name(0)}")
+        logger.info(f"CUDA Version: {torch.version.cuda}")
+else:
+    logger.info("Running locally")
+logger.info(f"Device: {DEVICE}")
+
 
 class ForexClassifierPipeline:
     """
@@ -46,16 +62,26 @@ class ForexClassifierPipeline:
     model training, and evaluation
     """
 
-    def __init__(self, currency_pair: str = PRIMARY_PAIR):
+    def __init__(self, currency_pair: str = PRIMARY_PAIR, use_kaggle_data: bool = IS_KAGGLE):
         """
         Initialize pipeline
 
         Args:
             currency_pair: Currency pair to trade (e.g., 'EUR_USD')
+            use_kaggle_data: Whether to use Kaggle dataset (auto-detected)
         """
         self.currency_pair = currency_pair
-        self.fx_data = FXDataAcquisition()
-        self.macro_data = MacroDataAcquisition()
+        self.use_kaggle_data = use_kaggle_data
+
+        # Initialize data sources
+        if use_kaggle_data:
+            self.kaggle_loader = KaggleFXDataLoader()
+            logger.info("Using Kaggle dataset")
+        else:
+            self.fx_data = FXDataAcquisition()
+            self.macro_data = MacroDataAcquisition()
+            logger.info("Using OANDA/API data sources")
+
         self.tech_engineer = TechnicalFeatureEngineer()
         self.sentiment_analyzer = SentimentAnalyzer()
 
@@ -68,36 +94,51 @@ class ForexClassifierPipeline:
 
     def fetch_data(
         self,
-        start_date: datetime,
-        end_date: datetime,
+        start_date: datetime = None,
+        end_date: datetime = None,
         save: bool = True,
     ):
         """
         Step 1: Fetch all required data
 
         Args:
-            start_date: Start date for data
-            end_date: End date for data
+            start_date: Start date for data (ignored on Kaggle)
+            end_date: End date for data (ignored on Kaggle)
             save: Whether to save data to disk
         """
         logger.info("="*60)
         logger.info("STEP 1: DATA ACQUISITION")
         logger.info("="*60)
 
-        # Fetch FX price data
-        logger.info(f"Fetching FX data for {self.currency_pair}")
-        df_m5 = self.fx_data.fetch_oanda_candles(
-            instrument=self.currency_pair,
-            granularity="M5",
-            start_date=start_date,
-            end_date=end_date,
-        )
+        if self.use_kaggle_data:
+            # Load from Kaggle dataset
+            logger.info(f"Loading {self.currency_pair} from Kaggle dataset")
+            # Convert symbol format: EUR_USD -> EURUSD
+            symbol = self.currency_pair.replace("_", "")
+            df_m5 = self.kaggle_loader.load_symbol_data(symbol, timeframe="M5")
 
-        # Resample to 4H
-        self.df_price = self.fx_data.resample_to_timeframe(df_m5, "4H")
+            logger.info(f"Loaded {len(df_m5):,} M5 candles")
+            logger.info(
+                f"Date range: {df_m5.index.min()} to {df_m5.index.max()}")
 
-        # Validate quality
-        quality = self.fx_data.validate_data_quality(self.df_price)
+            # For Kaggle, use M5 data directly or resample as needed
+            self.df_price = df_m5  # Can resample if needed
+
+        else:
+            # Fetch FX price data from OANDA
+            logger.info(f"Fetching FX data for {self.currency_pair}")
+            df_m5 = self.fx_data.fetch_oanda_candles(
+                instrument=self.currency_pair,
+                granularity="M5",
+                start_date=start_date,
+                end_date=end_date,
+            )
+
+            # Resample to 4H
+            self.df_price = self.fx_data.resample_to_timeframe(df_m5, "4H")
+
+            # Validate quality
+            quality = self.fx_data.validate_data_quality(self.df_price)
         logger.info(
             f"Price data quality score: {quality['quality_score']:.2%}")
 
