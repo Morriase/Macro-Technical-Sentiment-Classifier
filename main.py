@@ -140,9 +140,16 @@ class ForexClassifierPipeline:
             # For Kaggle, use M5 data directly or resample as needed
             self.df_price = df_m5  # Can resample if needed
 
-            # Skip quality validation and macro events on Kaggle (no API access)
+            # Load pre-downloaded macro events
+            logger.info(f"Loading macro events for {symbol}")
+            self.df_events = self.kaggle_loader.load_macro_events(symbol)
+            if self.df_events is not None and not self.df_events.empty:
+                logger.success(f"✓ Loaded {len(self.df_events)} macro events")
+            else:
+                logger.warning(
+                    "⚠ No macro events found - training without macro features")
+
             logger.info("✓ Data loaded successfully from Kaggle dataset")
-            self.df_events = None  # No macro events on Kaggle
 
         else:
             # Fetch FX price data from OANDA

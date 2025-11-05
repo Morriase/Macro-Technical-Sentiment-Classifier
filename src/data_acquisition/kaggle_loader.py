@@ -1,10 +1,10 @@
 """
 Data Loading Utilities for Kaggle Environment
-Handles loading FX data from Kaggle dataset with GPU optimization
+Handles loading FX data and macro events from Kaggle dataset with GPU optimization
 """
 import pandas as pd
 from pathlib import Path
-from typing import List, Dict
+from typing import List, Dict, Optional
 from loguru import logger
 from src.config import DATA_DIR, IS_KAGGLE, GPU_CONFIG
 import torch
@@ -12,7 +12,7 @@ from torch.utils.data import Dataset, DataLoader
 
 
 class KaggleFXDataLoader:
-    """Load FX data from Kaggle dataset"""
+    """Load FX data and macro events from Kaggle dataset"""
 
     def __init__(self, data_dir: Path = DATA_DIR):
         """
@@ -24,13 +24,17 @@ class KaggleFXDataLoader:
         self.data_dir = Path(data_dir)
 
         if IS_KAGGLE:
-            # On Kaggle, uploaded dataset structure: /kaggle/input/training-dataset-for-sentiment/data/kaggle_dataset/fx_data/
+            # On Kaggle, uploaded dataset structure
             self.fx_data_dir = self.data_dir / "data" / "kaggle_dataset" / "fx_data"
+            self.macro_events_dir = self.data_dir / \
+                "data" / "kaggle_dataset" / "macro_events"
         else:
-            # Local: data/kaggle_dataset/fx_data/
+            # Local structure
             self.fx_data_dir = self.data_dir / "kaggle_dataset" / "fx_data"
+            self.macro_events_dir = self.data_dir / "kaggle_dataset" / "macro_events"
 
         logger.info(f"FX Data Directory: {self.fx_data_dir}")
+        logger.info(f"Macro Events Directory: {self.macro_events_dir}")
 
     def load_symbol_data(self, symbol: str, timeframe: str = "M5") -> pd.DataFrame:
         """
@@ -101,6 +105,65 @@ class KaggleFXDataLoader:
 
         symbols = [f.stem.replace(f"_{timeframe}", "") for f in files]
         return sorted(symbols)
+
+    def load_macro_events(self, symbol: Optional[str] = None) -> pd.DataFrame:
+        """
+        Load pre-downloaded macro events from Kaggle dataset
+
+        Args:
+            symbol: Specific symbol to load events for (e.g., 'EURUSD')
+                   If None, loads all available events
+
+        Returns:
+            DataFrame with macro events
+        """
+        if not self.macro_events_dir.exists():
+            logger.warning(
+                f"Macro events directory not found: {self.macro_events_dir}")
+            return pd.DataFrame()
+
+        if symbol:
+            # Load events for specific symbol
+            filename = f"{symbol}_events.parquet"
+            filepath = self.macro_events_dir / filename
+
+            if not filepath.exists():
+                logger.warning(
+                    f"Events file not found for {symbol}: {filepath}")
+                return pd.DataFrame()
+
+            logger.info(f"Loading macro events for {symbol} from {filepath}")
+            df = pd.read_parquet(filepath)
+
+            logger.info(f"Loaded {len(df)} events for {symbol}")
+            logger.info(
+                f"Date range: {df['date'].min()} to {df['date'].max()}")
+
+            return df
+        else:
+            # Load all available events
+            pattern = "*_events.parquet"
+            files = list(self.macro_events_dir.glob(pattern))
+
+            if not files:
+                logger.warning(
+                    f"No macro event files found in {self.macro_events_dir}")
+                return pd.DataFrame()
+
+            logger.info(f"Found {len(files)} macro event files")
+
+            all_events = []
+            for filepath in files:
+                symbol_name = filepath.stem.replace("_events", "")
+                df = pd.read_parquet(filepath)
+                df['symbol'] = symbol_name  # Add symbol column
+                all_events.append(df)
+                logger.info(f"  {symbol_name}: {len(df)} events")
+
+            combined = pd.concat(all_events, ignore_index=True)
+            logger.info(f"Total events loaded: {len(combined)}")
+
+            return combined
 
 
 class FXDataset(Dataset):
