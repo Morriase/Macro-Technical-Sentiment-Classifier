@@ -1,0 +1,272 @@
+Technical Specification: Macro-Technical Sentiment Forex Directional Classifier (4-24 Hour Horizon)
+This report details the technical specifications and methodological requirements for implementing a sophisticated quantitative strategy designed to capture medium-term (4 to 24 hour) directional movements in major currency pairs (e.g., EUR/USD, GBP/USD). The strategy relies on a hybrid stacking ensemble architecture, fusing high-fidelity technical indicators, engineered macroeconomic surprise factors, and specialized natural language processing (NLP) sentiment data. Given the non-stationary nature of the foreign exchange market, the framework emphasizes adaptive feature construction, robust machine learning architectures, and rigorous validation through Walk-Forward Optimization (WFO).
+
+Section 1: Data Layer Specification and Acquisition Strategy
+The foundational layer of this classification system requires diverse data sources, necessitating a robust acquisition and quality assurance pipeline to support the complex, multi-modal feature engineering process.
+
+1.1. High-Frequency FX Price Data Acquisition and Fidelity
+The goal of predicting direction over a 4 to 24-hour window requires the underlying technical features to be derived from data with sufficient granularity to capture intraday dynamics and minimize noise in feature calculation.
+
+The data acquisition strategy mandates sourcing high-fidelity, historical OHLCV (Open, High, Low, Close, Volume) data at a 1-minute or 5-minute resolution. Although the ultimate prediction is made on a 4-hour bar basis, utilizing granular data is essential for generating precise, instantaneous technical indicator values at the close of the 4-hour training period. This high-frequency data provides the necessary microstructure detail required for generating predictive features.   
+
+Commercial sources, such as the OANDA FX API, offer reliability, providing access to over 32 years of historical data, including mid-point, bid, and ask rates, as well as tick-level data, which is crucial for achieving high data fidelity. For open-source solutions, wrappers utilizing data from providers like Dukascopy offer robust access to historical tick data and support efficient candle formatting across various timeframes, from 1 minute to 1 day. Data quality control is non-negotiable; ensuring accuracy above 98% and conducting routine sanity checks, gap filling, and validation are prerequisites for reliable feature engineering and backtesting.   
+
+1.2. Sourcing and Structuring Macroeconomic Event Data
+The integration of fundamental data requires a structured method for quantifying event impact and proximity. This process transforms abstract economic news into tangible, predictive inputs for the machine learning classifier.
+
+Access to the economic calendar must be facilitated through reliable APIs, such as Trading Economics or Finnhub, which offer structured querying of historical data and real-time event updates in formats like JSON or CSV. The focus must be placed exclusively on high-impact events (often categorized as 3-star) concerning the central banks and key economic indicators (e.g., NFP, CPI, interest rate decisions) of the two countries composing the currency pair (e.g., US and EU/UK). For each prioritized event, the model requires four distinct data points: the scheduled release Time, the Actual released Value, the Consensus Forecast, and the Previous Value.   
+
+1.3. Integrating Institutional Sentiment (COT Data)
+Commitment of Traders (COT) data, released weekly by the Commodity Futures Trading Commission (CFTC), offers a crucial perspective on non-commercial (speculative) positioning, serving as a powerful, low-frequency indicator of long-term institutional bias.   
+
+Acquisition should leverage specialized open-source Python libraries designed to systematically fetch the required reports, such as the Disaggregated Futures and Traders in Financial Futures (TFF) reports. The key metrics for this strategy are the Non-Commercial Long Positions, Non-Commercial Short Positions, and Total Open Interest for the respective currency futures contracts (e.g., Euro FX Futures).   
+
+The inherent weekly frequency of COT data dictates that it cannot function as a primary signal generator for a 4-24 hour strategy. Instead, its function is to act as a market regime filter. For instance, if the normalized non-commercial net positioning indicates an extreme bullish bias (e.g., placing in the top 10% of its historical range), this strong underlying institutional support should necessitate a higher confidence threshold from the AI classifier before initiating a "Sell" signal. This integration transforms the COT input from a simple feature into a regulatory or weighting constraint within the prediction logic, ensuring that short-term signals do not aggressively contradict deeply entrenched institutional trends.   
+
+Section 2: Advanced Multi-Modal Feature Engineering
+Classification model performance is determined by the quality and domain relevance of the engineered features. The following outlines the transformation of raw data across technical, macroeconomic, and sentiment modalities into standardized, predictive signals.
+
+2.1. Refined Technical Indicator Features
+Technical indicators provide essential confirmation and contextualize short-term price action, acting as filters for market noise.   
+
+For trend confirmation, Exponential Moving Averages (EMA) at 50, 100, and 200 periods (H4 timeframe) are utilized. Features are generated by calculating the relative distance of the current price from these EMAs, normalized by the Average True Range (ATR). Binary features encoding recent cross-over status (e.g., 50 EMA crossing above 100 EMA) are also included. Momentum is captured using the Relative Strength Index (RSI) and Stochastic Oscillators (typically 14 periods). The raw indicator values are normalized (0 to 1) or encoded categorically (e.g., RSI >70 is encoded as 1 for an overbought condition).   
+
+Volatility encoding is critical for risk management and signal filtering. The Average True Range (ATR, 14-period) is standardized into a Z-Score relative to its own 50-period moving average. This normalized ATR captures the instantaneous volatility relative to its recent historical norm, enabling the model to account for the current risk environment. Finally, feature crosses—such as the product of the Normalized RSI and the Normalized ATR—are utilized to capture complex market states where high momentum coincides with elevated volatility, indicating potential instability.   
+
+Technical Feature Engineering Schema
+
+Indicator	Lookback Period (Default)	Target Timeframe	Classification Value Encoding	Purpose
+EMA Status (50, 100, 200)	N/A (Price vs. EMA)	4-Hour	Normalized Distance (Price - EMA) / ATR	Trend Direction and Strength
+RSI (Relative Strength Index)	14	4-Hour	Normalized (0 to 1), Binary Overbought/Oversold (e.g., >70)	Momentum and Reversal Potential
+ATR (Average True Range)	14	4-Hour	Z-Score relative to 50-period ATR average	Dynamic Volatility/Risk Measure
+Stochastic Oscillator	14, 3, 3	4-Hour	Raw %K and %D Values (0-100)	Confirmation of Momentum Reversal
+2.2. Engineering Macro-Fundamental Surprise and Proximity Features
+A core element of this classification strategy is the transformation of discrete, high-impact economic events into continuous, temporal features that quantify both the magnitude of the surprise and its lingering influence.   
+
+2.2.1. The Surprise Factor
+The raw difference between the Actual release and the Consensus Forecast must be standardized to create a Surprise Z-Score. This standardization reflects the unexpectedness of events (like CPI or NFP releases) relative to the historical volatility of forecast errors, yielding a standardized continuous feature (e.g., ±3.0 standard deviations). The calculation is defined as:   
+
+Surprise Z-Score= 
+σ 
+Historical Forecast Error
+​
+ 
+Actual Value−Consensus Forecast
+​
+ 
+2.2.2. Proximity Encoding (Temporal Decay)
+The impact of an economic event diminishes over time. This effect is modeled through two non-linear temporal decay features:   
+
+Pre-Event Proximity (τ 
+pre
+​
+ ): Models the anticipatory volatility leading up to the release. This feature, calculated as the time remaining until the event, is encoded using an inverse non-linear function, such that the value approaches 1 as the time to the event approaches zero.
+
+Post-Event Influence (τ 
+post
+​
+ ): Models the market’s digestion of the news shock. This feature applies an exponential decay function (e 
+−λ⋅t
+ ) directly to the Surprise Z-Score, where λ is a decay constant adjusted for the magnitude of the specific indicator (e.g., NFP shock influence decays slower than PMI shock).
+
+The predictive power of technical indicators is known to decrease dramatically immediately preceding and following a major economic release. Therefore, the generated Proximity features (τ 
+pre
+​
+ ,τ 
+post
+​
+ ) must not only be fed directly into the model but should also be used to dynamically weight the importance of the technical features within the ensemble architecture. For example, if a major event is imminent (high τ 
+pre
+​
+ ), the weights assigned to trend-following technical features (like EMA crosses) should be reduced, as price action is currently dominated by anticipation rather than technical flow.   
+
+2.3. Specialized NLP for Currency Pair Sentiment
+Accurate sentiment measurement in Forex requires models trained specifically on financial language, recognizing that standard NLP tools often fail to capture the nuanced, domain-specific terminology present in financial news.   
+
+The implementation must leverage specialized models, such as FinBERT or derivatives of FinGPT, which are pre-trained on financial corpora and designed for tasks like text classification and sentiment analysis in this context.   
+
+Crucially, because exchange rates are relative measures, the sentiment pipeline must analyze news flow separately for each currency within the pair (e.g., USD-related news versus EUR-related news). This leads to the derivation of two primary sentiment features:
+
+Absolute Sentiment Score (A): The aggregated, short-term moving average of the sentiment polarity (Positive - Negative) for the Base currency (e.g., EUR news).
+
+Differential Sentiment Score (D): The critical feature derived from the difference between the Base and Quote currency sentiment scores (S 
+Base
+​
+ −S 
+Quote
+​
+ ). This feature quantifies the divergence in financial narrative, which is highly predictive for exchange rate movement.   
+
+Furthermore, to enhance the predictive context, the strategy should advance beyond simple polarity by integrating thematic analysis. Techniques such as Latent Dirichlet Allocation (LDA) can be employed alongside sentiment scoring to generate features representing the current market's attention to specific macroeconomic themes (e.g., geopolitical risk or central bank expectations). This multi-modal fusion of textual data with structured time series inputs provides a more comprehensive view of market dynamics.   
+
+2.4. Transforming COT Data into Trading Signals
+COT data, while slow-moving, serves as a consistent indicator of the positioning of sophisticated traders. The normalized Net Non-Commercial Position must be calculated:
+
+COT 
+Net Norm
+​
+ = 
+Open Interest
+Long−Short
+​
+ 
+This raw value is then normalized relative to its own long-term historical extremes (e.g., a 3-year min/max scaling or Z-score normalization) to create a feature ranging from 0 to 1. This feature is assigned to every 4-hour bar throughout the week, providing a persistent, low-frequency institutional background bias to the model.
+
+Section 3: Optimized Classification Architecture and Training
+The complexity and heterogeneity of the input features (technical, macro, and sentiment) necessitate a robust, adaptive classification framework. A hybrid stacking ensemble model is mandated to optimally blend the non-linear feature interactions and capture complex decision boundaries.   
+
+3.1. Rationale for Hybrid Model Selection
+A single classification model (like a basic Random Forest or a simple Neural Network) is often insufficient for non-stationary financial data. The ensemble approach leverages the strengths of diverse model types. Tree-based models, such as XGBoost and Random Forest, excel at capturing sharp, non-linear interactions and thresholds, which is ideal for modeling rules driven by technical indicators and macroeconomic surprise factors. Conversely, a Multi-Layer Perceptron (MLP) is a powerful general function approximator, capable of learning sophisticated decision boundaries and non-linear relationships, particularly when blending the probabilistic outputs of multiple base learners.   
+
+3.2. Proposed Stacking Ensemble Architecture
+The proposed architecture utilizes a two-layer stacking approach, where the final prediction is derived from a meta-learner analyzing the predictions of two specialized base classifiers.   
+
+Level-0 Base Learners
+XGBoost Classifier (BL1): This learner is specialized for high-conviction, event-driven signals. It is trained primarily on the technical features (especially volatility and momentum) and the macroeconomic Surprise Z-Score/Proximity features.
+
+Random Forest Classifier (BL2): This learner provides a robust, variance-reduced estimate. It is trained on the core technical features, the Differential Sentiment Score, and the normalized COT positioning.
+
+Level-1 Meta-Learner
+The Multi-Layer Perceptron (MLP) serves as the meta-learner. Its input layer receives the six probability outputs (P(Buy), P(Sell), P(Hold) from BL1 and P(Buy), P(Sell), P(Hold) from BL2). The MLP is then trained to find the optimal, non-linear blending weights for these six probabilistic inputs, aiming to maximize the final out-of-sample prediction accuracy and conviction.   
+
+Hybrid Stacking Ensemble Architecture Specification
+
+Layer	Model Type	Primary Inputs	Output	Training Objective
+Level-0 (BL1)	XGBoost Classifier	Technical Features, Macro Surprise/Proximity	P(Buy), P(Sell), P(Hold)	Identify High-Impact, Event-Driven Signals
+Level-0 (BL2)	Random Forest Classifier	Technical Features, Sentiment Divergence, COT Data	P(Buy), P(Sell), P(Hold)	Provide Robust, Variance-Reduced Directional Estimate
+Level-1 (ML)	Multi-Layer Perceptron (MLP)	BL1 and BL2 Probability Outputs (6 features total)	Final P(Buy), P(Sell), P(Hold)	Optimize Blending Weights to Maximize Predictive Accuracy
+3.3. Training Protocols and Imbalance Handling
+Forex classification data is inherently imbalanced, with the "Hold" class typically dominating "Buy" and "Sell" signals. Addressing this imbalance is critical for generating tradable signals.
+
+Strategies to mitigate this imbalance in the training data include the use of resampling techniques, such as the Synthetic Minority Over-sampling Technique (SMOTE), to balance the training set, or implementing cost-sensitive learning, which applies a heavier penalty to the misclassification of the minority classes ("Buy" and "Sell") in the loss function. Alternatively, the target definition itself can be refined by classifying data into impactful (positive/negative) and non-impactful categories based on whether a price move exceeded a specific volatility threshold (e.g., 1x ATR move in the next 24 hours).   
+
+It is essential to recognize the functional separation between the model's training objective and the strategy's execution objective. While the model must be trained on balanced data to ensure directional accuracy, the actual execution logic imposes a high confidence threshold (e.g., >70%) on the prediction. This high threshold serves as the primary filter during live trading, effectively re-instating a market-realistic bias toward "Hold" by suppressing low-conviction predictions, thereby curbing the risk of over-trading that often results from aggressive balancing techniques.
+
+Section 4: Rigorous Validation and Backtesting Framework
+Due to the highly non-stationary nature of currency markets—where economic regimes and volatility environments shift unpredictably—traditional static backtesting is unreliable and highly susceptible to data snooping bias. The implementation of Walk-Forward Optimization (WFO) is mandatory for rigorous validation.   
+
+4.1. Implementation of Walk-Forward Optimization (WFO)
+WFO is an adaptive validation technique that accurately simulates how a live trading system operates: optimizing parameters on historical data and testing them forward on new, unseen data.   
+
+The WFO blueprint involves a rolling window methodology:
+
+In-Sample (IS) Optimization: A defined period (e.g., two years of historical data) is used to train the Level-0 and Level-1 classifiers and to tune all critical hyperparameters, including the SL Multiplier, R/R ratio, and the confidence threshold.
+
+Out-of-Sample (OOS) Validation: A subsequent, immediate period (e.g., six months) is used for unbiased testing using the optimized parameters from the preceding IS window. This OOS performance represents the true expected live profitability.
+
+Rolling Cycle: After the OOS period, the window shifts forward by the OOS duration. The previously validated data is incorporated into the new IS optimization set, and the process repeats.   
+
+To prevent overfitting within the optimization stage, regularization techniques (such as dropout in the MLP or weight decay in XGBoost) must be applied. Furthermore, nested cross-validation within the IS period must be utilized to select robust model hyperparameters before they are deployed for the OOS testing phase. Libraries such as PyAlgoTrade or Zipline offer starting points for building the required customized backtesting infrastructure.   
+
+4.2. Essential Performance Metrics for Non-Stationary FX
+The evaluation of the strategy must prioritize financial viability over raw classification accuracy, focusing on risk-adjusted returns and capital preservation metrics.   
+
+Key metrics required during OOS validation include:
+
+Profit Factor: Calculated as the Total Gross Profit divided by the Total Gross Loss. A viable strategy requires a Profit Factor significantly greater than 1.0 to cover execution costs and provide an adequate return.   
+
+Maximum Drawdown (MDD): The largest historical peak-to-trough decline in the equity curve. This metric quantifies the capital risk and is a critical determinant of system psychological viability.   
+
+Sharpe Ratio and Calmar Ratio: Measures of risk-adjusted return, quantifying the strategy's return excess relative to volatility (Sharpe) and return relative to MDD (Calmar).
+
+Trade-Level Analytics: Detailed tracking of Win Rate, Average P&L per winning trade, Average P&L per losing trade, and average trade duration provides necessary granularity for diagnosing performance.
+
+Crucially, the objective function for the WFO optimization cycles should be the maximization of the OOS Profit Factor or Sharpe Ratio, rather than merely maximizing the directional prediction accuracy.
+
+4.3. Ensuring Backtest Fidelity (Avoiding Bias)
+The backtesting framework must rigorously incorporate real-world execution friction to avoid generating optimistically biased performance results.   
+
+Transaction Costs and Slippage: Every simulated trade entry and exit must account for realistic transaction costs (variable spreads based on time-of-day and liquidity) and a conservative slippage factor (e.g., 1-2 pips) to simulate the reality of market order execution.
+
+Regime Shift Testing: Explicit validation must occur across diverse market environments, including periods of low volatility, high volatility, and known financial crises, as the model's parameters and expected performance may degrade significantly during regime shifts.   
+
+Section 5: Dynamic Execution and Risk Management Logic
+The success of the classifier hinges on transforming the model's probabilistic output into a financially sound trading decision, managed by volatility-aware risk protocols.
+
+5.1. Confidence-Weighted Trade Entry System
+The entry logic is a hybrid system, requiring the satisfaction of both the machine learning model's high conviction and supporting technical confirmation.   
+
+The refined entry condition for a Long signal, for example, requires:
+
+$$ \text{Signal}{\text{Long}} = \text{MLP}{\text{P(Buy)}} > C_{\text{Threshold}} \quad \text{AND} \quad \text{Technical Confirmation} $$
+
+The technical confirmation must align with the directional bias, such as RSI indicating an oversold condition (RSI 
+14
+​
+ <30) or price trading below the mid-term trend (Price<EMA 
+50
+​
+ ). This compound condition acts as a robust filter against noisy, low-conviction signals.   
+
+Dynamic Confidence Threshold
+The confidence threshold (C 
+Threshold
+​
+ ) must be optimized via WFO, starting with a base of 70%, but critically, it must be dynamic and adaptive to market volatility. The rationale is that high-volatility environments introduce greater uncertainty, requiring higher conviction from the model to justify execution.   
+
+This dynamic adjustment can be implemented by linking the threshold to the Normalized ATR (from Section 2.1):
+
+$$ C_{\text{Threshold}} = C_{\text{Base}} + C_{\text{Sensitivity}} \times \text{ATR}_{\text{Normalized}} $$
+
+If the ATR 
+Normalized
+​
+  is 1.0 (average volatility), the threshold remains at C 
+Base
+​
+  (e.g., 70%). If volatility is one standard deviation above average (ATR 
+Normalized
+​
+ =1), the required confidence rises accordingly, mitigating execution risk during highly unpredictable market phases.
+
+5.2. Adaptive ATR-Based Risk Sizing
+All risk management components must be volatility-adaptive, using the Average True Range (ATR) to define stop-loss (SL) and take-profit (TP) levels.   
+
+Stop-Loss and Take-Profit
+The Stop-Loss Distance is calculated by applying a multiplier to the recent ATR, ensuring the stop is placed outside the current expected noise range:
+
+Stop-Loss Distance=ATR 
+14
+​
+ ×SL Multiplier
+The SL Multiplier (initially 1.5x) must be a key parameter optimized during the WFO cycles.   
+
+The Take-Profit Distance is calculated dynamically based on a fixed, optimized Risk/Reward (R/R) ratio (e.g., 2.0:1):
+
+Take-Profit Distance=Stop-Loss Distance×R/R Ratio
+Alternatively, a time-based exit strategy is required to close trades that have not reached TP or SL after a maximum period (e.g., 6 bars, equating to the maximum 24-hour prediction horizon). This prevents capital from being tied up in stagnant positions.
+
+Dynamic Execution Parameters (WFO Optimized)
+
+Parameter	Formula / Description	Initial Default Value	Optimization Range (WFO)
+Prediction Horizon	Time period to observe price movement for target Buy/Sell/Hold label.	4-24 Hours	Categorical (4H, 8H, 12H, 24H)
+Confidence Threshold (C 
+Threshold
+​
+ )	Minimum MLP 
+P(Direction)
+​
+  required for entry.	70%	
+65% to 85% (Dynamically linked to ATR) 
+
+Stop-Loss Multiplier	Multiplier applied to ATR 
+14
+​
+  for SL distance.	1.5x	
+1.5x to 3.0x 
+
+Risk/Reward Ratio	Target TP distance relative to SL distance.	2.0:1	1.5x to 3.0x
+Time-Based Exit (N)	Number of 4-hour bars after which an open trade is closed.	6 bars (24 hours)	4 to 12 bars
+  
+5.3. Strategy Monitoring and Degradation Detection
+Sustained profitability in non-stationary markets requires continuous monitoring for model degradation. If the underlying market dynamics shift, the model's feature weightings and optimized parameters may become obsolete, necessitating retraining.
+
+Continuous monitoring must compare the live performance metrics (Profit Factor, Maximum Drawdown) against the established benchmarks derived from the WFO OOS results. A significant deviation—for example, if the live MDD exceeds 50% of the maximum backtested MDD—must trigger an immediate alert.   
+
+Furthermore, monitoring the feature importance scores provided by the Level-0 XGBoost classifier is essential. A notable shift—such as a decrease in the predictive importance of Macro Surprise features coinciding with an increase in Sentiment features—signals a structural change in market drivers (e.g., a shift from event-driven trading to speculative/noise-driven trading). Such a detection must automatically initiate the next Walk-Forward Optimization cycle (re-training the model on the newest data) to ensure the system remains highly adaptive and resilient to regime shifts.   
+
+Conclusion
+The Macro-Technical Sentiment Classifier requires implementation as a complex, multi-modal system capable of synthesizing technical momentum, quantified macroeconomic shocks, and specialized financial sentiment divergence. The reliance on a hybrid stacking ensemble (XGBoost, Random Forest, MLP) provides the necessary flexibility to interpret high-dimensional feature spaces.
+
+The most critical requirement for transitioning this strategy from concept to production is the adoption of the rigorous Walk-Forward Optimization framework, coupled with dynamic risk management systems based on ATR. The strategy’s viability is secured by two interconnected principles: first, decoupling the model’s training objective (accuracy on balanced data) from the execution objective (profitability via high-conviction thresholds); and second, ensuring that core features, such as the Macro Surprise Factor and the Confidence Threshold, are dynamically responsive to prevailing market volatility. Successfully implementing this specification will yield an adaptive, high-conviction directional classifier suitable for the 4-24 hour trading horizon in major currency markets.
+
