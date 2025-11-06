@@ -86,7 +86,8 @@ class ForexClassifierPipeline:
             self.kaggle_loader = KaggleFXDataLoader()
             self.fx_data = None
             # Create MacroDataAcquisition for feature calculations (doesn't need API)
-            self.macro_data = MacroDataAcquisition() if (HAS_API_SOURCES and MacroDataAcquisition) else None
+            self.macro_data = MacroDataAcquisition() if (
+                HAS_API_SOURCES and MacroDataAcquisition) else None
             logger.info("Using Kaggle dataset")
         else:
             if not HAS_API_SOURCES:
@@ -217,7 +218,8 @@ class ForexClassifierPipeline:
                 price_df=self.df_features,
             )
         else:
-            logger.warning("No macro events available or macro_data not initialized")
+            logger.warning(
+                "No macro events available or macro_data not initialized")
             self.df_features["tau_pre"] = 0.0
             self.df_features["tau_post"] = 0.0
             self.df_features["weighted_surprise"] = 0.0
