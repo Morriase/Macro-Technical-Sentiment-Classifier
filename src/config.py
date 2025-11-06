@@ -133,7 +133,7 @@ ENSEMBLE_CONFIG = {
 
 # Walk-Forward Optimization Configuration
 WFO_CONFIG = {
-    "train_window_years": 0.75,  # In-sample period (9 months)
+    "train_window_months": 9,  # In-sample period (9 months)
     "test_window_months": 2,  # Out-of-sample period
     "step_months": 2,  # Rolling step size
     "min_train_samples": 5000,
