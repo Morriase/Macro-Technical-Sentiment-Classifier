@@ -165,9 +165,19 @@ class HybridEnsemble:
             )
             lstm_fold.fit(X_train_fold, y_train_fold, X_val_fold, y[val_idx])
 
-            # LSTM requires sequence length padding
-            # For samples < sequence_length, we'll duplicate to pad
+            # LSTM requires sequence length, so it returns fewer predictions
+            # (drops first sequence_length-1 samples)
             lstm_proba_fold = lstm_fold.predict_proba(X_val_fold)
+
+            # Handle shape mismatch: LSTM drops first sequence_length-1 samples
+            seq_len = self.lstm_params.get("sequence_length", 22)
+            if len(lstm_proba_fold) < len(val_idx):
+                # Pad with uniform probabilities for first few samples
+                n_missing = len(val_idx) - len(lstm_proba_fold)
+                uniform_proba = np.full(
+                    (n_missing, lstm_proba_fold.shape[1]), 1.0 / lstm_proba_fold.shape[1])
+                lstm_proba_fold = np.vstack([uniform_proba, lstm_proba_fold])
+
             lstm_oof_proba[val_idx] = lstm_proba_fold
 
             logger.info(f"Fold {fold_idx + 1} completed")
