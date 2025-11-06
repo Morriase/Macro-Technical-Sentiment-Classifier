@@ -345,7 +345,8 @@ class LSTMSequenceModel:
                 else:
                     patience_counter += 1
                     if patience_counter >= self.early_stopping_patience:
-                        logger.info(f"Early stopping at epoch {epoch+1} - Val Loss: {val_loss:.4f}")
+                        logger.info(
+                            f"Early stopping at epoch {epoch+1} - Val Loss: {val_loss:.4f}")
                         break
             else:
                 if (epoch + 1) % 20 == 0:  # Log every 20 epochs instead of 10
