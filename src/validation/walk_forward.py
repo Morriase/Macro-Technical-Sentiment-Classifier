@@ -21,7 +21,7 @@ class WalkForwardSplitter:
 
     def __init__(
         self,
-        train_window_years: int = 2,
+        train_window_months: int = 12,
         test_window_months: int = 6,
         step_months: int = 6,
         min_train_samples: int = 5000,
@@ -30,12 +30,12 @@ class WalkForwardSplitter:
         Initialize walk-forward splitter
 
         Args:
-            train_window_years: In-sample training period (years)
+            train_window_months: In-sample training period (months)
             test_window_months: Out-of-sample testing period (months)
             step_months: Rolling step size (months)
             min_train_samples: Minimum training samples required
         """
-        self.train_window_years = train_window_years
+        self.train_window_months = train_window_months
         self.test_window_months = test_window_months
         self.step_months = step_months
         self.min_train_samples = min_train_samples
@@ -62,7 +62,7 @@ class WalkForwardSplitter:
         max_date = dates.max()
 
         # Initial train window end
-        train_end = min_date + pd.DateOffset(years=self.train_window_years)
+        train_end = min_date + pd.DateOffset(months=self.train_window_months)
 
         split_count = 0
 
@@ -127,7 +127,7 @@ class WalkForwardOptimizer:
         self.optuna_config = optuna_config
 
         self.splitter = WalkForwardSplitter(
-            train_window_years=wfo_config["train_window_years"],
+            train_window_months=wfo_config["train_window_months"],
             test_window_months=wfo_config["test_window_months"],
             step_months=wfo_config["step_months"],
             min_train_samples=wfo_config["min_train_samples"],
