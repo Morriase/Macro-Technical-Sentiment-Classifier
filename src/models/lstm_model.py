@@ -3,7 +3,7 @@ LSTM Sequence Model for Temporal Pattern Recognition
 Designed for financial time series with strong temporal dependencies
 Optimized for GPU/CUDA training on Kaggle
 """
-from torch.cuda.amp import autocast, GradScaler
+from torch.amp import autocast, GradScaler
 from src.config import ENSEMBLE_CONFIG, GPU_CONFIG, DEVICE, USE_CUDA
 from sklearn.preprocessing import MinMaxScaler
 from loguru import logger
@@ -184,7 +184,7 @@ class LSTMSequenceModel:
 
         # Mixed precision training (for faster GPU training)
         self.use_amp = GPU_CONFIG['mixed_precision']
-        self.scaler_amp = GradScaler() if self.use_amp else None
+        self.scaler_amp = GradScaler('cuda') if self.use_amp else None
 
         # Gradient accumulation for larger effective batch size
         self.gradient_accumulation_steps = GPU_CONFIG['gradient_accumulation_steps']
@@ -296,7 +296,7 @@ class LSTMSequenceModel:
 
                 # Forward pass with mixed precision
                 if self.use_amp:
-                    with autocast():
+                    with autocast('cuda'):
                         outputs = self.model(X_batch)
                         loss = criterion(outputs, y_batch)
                     # Scale loss for gradient accumulation
