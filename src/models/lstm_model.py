@@ -193,15 +193,13 @@ class LSTMSequenceModel:
         self.scaler = MinMaxScaler(feature_range=(0, 1))
         self.is_fitted = False
 
-        logger.info(f"LSTM model initialized on {self.device}")
-        logger.info(
-            f"CUDA available: {USE_CUDA}, Mixed Precision: {self.use_amp}")
-        logger.info(
-            f"Model parameters: {sum(p.numel() for p in self.model.parameters()):,}")
-        if USE_CUDA:
-            logger.info(f"GPU: {torch.cuda.get_device_name(0)}")
-            logger.info(
-                f"CUDA Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
+        # Reduced logging for cleaner output
+        # logger.info(f"LSTM model initialized on {self.device}")
+        # logger.info(f"CUDA available: {USE_CUDA}, Mixed Precision: {self.use_amp}")
+        # logger.info(f"Model parameters: {sum(p.numel() for p in self.model.parameters()):,}")
+        # if USE_CUDA:
+        #     logger.info(f"GPU: {torch.cuda.get_device_name(0)}")
+        #     logger.info(f"CUDA Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
 
     def prepare_sequences(
         self, X: np.ndarray, y: Optional[np.ndarray] = None
@@ -252,14 +250,14 @@ class LSTMSequenceModel:
             X_val: Validation features (optional)
             y_val: Validation labels (optional)
         """
-        logger.info("Starting LSTM training")
+        # logger.info("Starting LSTM training")
 
         # Normalize features
         X_scaled = self.scaler.fit_transform(X)
 
         # Prepare sequences
         X_seq, y_seq = self.prepare_sequences(X_scaled, y)
-        logger.info(f"Prepared {len(X_seq)} training sequences")
+        # logger.info(f"Prepared {len(X_seq)} training sequences")
 
         # Convert to tensors
         X_train_tensor = torch.FloatTensor(X_seq).to(self.device)
@@ -333,10 +331,12 @@ class LSTMSequenceModel:
                     val_outputs = self.model(X_val_tensor)
                     val_loss = criterion(val_outputs, y_val_tensor).item()
 
-                logger.info(
-                    f"Epoch {epoch+1}/{self.epochs} - "
-                    f"Loss: {avg_loss:.4f}, Val Loss: {val_loss:.4f}"
-                )
+                # Only log every 10 epochs or at early stopping
+                if (epoch + 1) % 10 == 0:
+                    logger.info(
+                        f"Epoch {epoch+1}/{self.epochs} - "
+                        f"Loss: {avg_loss:.4f}, Val Loss: {val_loss:.4f}"
+                    )
 
                 # Early stopping
                 if val_loss < best_val_loss:
@@ -345,15 +345,15 @@ class LSTMSequenceModel:
                 else:
                     patience_counter += 1
                     if patience_counter >= self.early_stopping_patience:
-                        logger.info(f"Early stopping at epoch {epoch+1}")
+                        logger.info(f"Early stopping at epoch {epoch+1} - Val Loss: {val_loss:.4f}")
                         break
             else:
-                if (epoch + 1) % 10 == 0:
+                if (epoch + 1) % 20 == 0:  # Log every 20 epochs instead of 10
                     logger.info(
                         f"Epoch {epoch+1}/{self.epochs} - Loss: {avg_loss:.4f}")
 
         self.is_fitted = True
-        logger.info("LSTM training completed")
+        # logger.info("LSTM training completed")
 
     def predict_proba(self, X: np.ndarray) -> np.ndarray:
         """
