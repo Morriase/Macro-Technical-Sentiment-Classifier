@@ -133,9 +133,9 @@ ENSEMBLE_CONFIG = {
 
 # Walk-Forward Optimization Configuration
 WFO_CONFIG = {
-    "train_window_years": 2,  # In-sample period
-    "test_window_months": 6,  # Out-of-sample period
-    "step_months": 6,  # Rolling step size
+    "train_window_years": 0.75,  # In-sample period (9 months)
+    "test_window_months": 2,  # Out-of-sample period
+    "step_months": 2,  # Rolling step size
     "min_train_samples": 5000,
     "cv_folds": 5,  # For nested cross-validation
 }
