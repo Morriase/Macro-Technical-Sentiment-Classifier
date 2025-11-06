@@ -156,18 +156,24 @@ class WalkForwardOptimizer:
         Returns:
             Optimization metric value
         """
-        # Suggest hyperparameters (customize for your model)
-        params = {
+        # Suggest hyperparameters for XGBoost base learner
+        xgb_params = {
+            "objective": "multi:softprob",
+            "num_class": 3,
             "learning_rate": trial.suggest_float("learning_rate", 0.001, 0.1, log=True),
             "max_depth": trial.suggest_int("max_depth", 3, 10),
             "n_estimators": trial.suggest_int("n_estimators", 100, 500),
-            "confidence_threshold": trial.suggest_float("confidence_threshold", 0.65, 0.85),
-            "stop_loss_multiplier": trial.suggest_float("stop_loss_multiplier", 1.0, 3.0),
-            "risk_reward_ratio": trial.suggest_float("risk_reward_ratio", 1.5, 3.0),
+            "subsample": trial.suggest_float("subsample", 0.6, 1.0),
+            "colsample_bytree": trial.suggest_float("colsample_bytree", 0.6, 1.0),
+            "min_child_weight": trial.suggest_int("min_child_weight", 1, 7),
+            "gamma": trial.suggest_float("gamma", 0.0, 0.5),
+            "reg_alpha": trial.suggest_float("reg_alpha", 0.0, 0.1),
+            "reg_lambda": trial.suggest_float("reg_lambda", 0.5, 2.0),
+            "random_state": self.splitter.min_train_samples,
         }
 
         # Train model with suggested parameters
-        model = self.model_class(config=params)
+        model = self.model_class(xgb_params=xgb_params)
         model.fit(X_train, y_train)
 
         # Evaluate on validation set
@@ -303,7 +309,22 @@ class WalkForwardOptimizer:
 
             # Train final model on full training data
             logger.info("Training model with optimized parameters")
-            model = self.model_class(config=best_params)
+            # Convert flat params dict to xgb_params structure
+            xgb_params = {
+                "objective": "multi:softprob",
+                "num_class": 3,
+                "learning_rate": best_params["learning_rate"],
+                "max_depth": best_params["max_depth"],
+                "n_estimators": best_params["n_estimators"],
+                "subsample": best_params["subsample"],
+                "colsample_bytree": best_params["colsample_bytree"],
+                "min_child_weight": best_params["min_child_weight"],
+                "gamma": best_params["gamma"],
+                "reg_alpha": best_params["reg_alpha"],
+                "reg_lambda": best_params["reg_lambda"],
+                "random_state": self.splitter.min_train_samples,
+            }
+            model = self.model_class(xgb_params=xgb_params)
             model.fit(X_train, y_train)
 
             # Evaluate on OOS test set
