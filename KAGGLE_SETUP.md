@@ -6,55 +6,55 @@ This guide helps you run the Macro-Technical Sentiment Classifier on Kaggle.
 
 ### Step 1: Create New Notebook
 1. Go to Kaggle.com and create a new notebook
-2. Settings → Internet: **ON** (required for API calls)
-3. Settings → GPU: **OFF** (CPU is sufficient for this project)
+2. Settings → Internet: **ON** (required for git clone)
+3. Settings → GPU: **GPU T4 x2** (required for CUDA training)
 4. Settings → Environment: Python
 
-### Step 2: Clone Repository
+### Step 2: Install TA-Lib FIRST (Critical!)
 ```python
-!git clone https://github.com/Morriase/Macro-Technical-Sentiment-Classifier.git
-%cd Macro-Technical-Sentiment-Classifier
+# TA-Lib must be installed before cloning repo
+!pip install TA-Lib
 ```
 
-### Step 3: Install Dependencies
+### Step 3: Clone Repository
 ```python
-# Install all required packages
-!pip install -q -r requirements.txt
+!cd /kaggle/working && git clone https://github.com/Morriase/Macro-Technical-Sentiment-Classifier.git
+%cd /kaggle/working/Macro-Technical-Sentiment-Classifier
+```
 
-# Install TA-Lib (special handling on Kaggle)
+### Step 4: Install Python Dependencies
+```python
+# Install required packages (most are pre-installed on Kaggle)
+!pip install -q finnhub-python python-dotenv
+```
+
+### Step 5: Add Dataset as Input
+1. In your Kaggle notebook, click "+ Add Data" in the right panel
+2. Search for your dataset: `macros-and-ohlc` (or the name you uploaded)
+3. Add it - it will be mounted at `/kaggle/input/macros-and-ohlc/`
+
+### Step 6: Run Training
+```python
+!cd /kaggle/working/Macro-Technical-Sentiment-Classifier && python main.py
+```
+
+### Step 7: Monitor Progress
+The training will output logs showing:
+- Data loading (80k candles, 84 events)
+- Feature engineering
+- Walk-forward validation progress
+- Model performance metrics
+
+---
+
+## One-Command Setup (Copy & Paste)
+
+```python
+# Run this in a single Kaggle cell
 !pip install -q TA-Lib
-```
-
-### Step 4: Download NLTK Data
-```python
-import nltk
-nltk.download('stopwords')
-nltk.download('wordnet')
-nltk.download('punkt')
-```
-
-### Step 5: Set Up API Keys
-Create a code cell with your API keys:
-```python
-import os
-
-# OANDA API (for FX data)
-os.environ['OANDA_API_KEY'] = 'your_oanda_api_key_here'
-os.environ['OANDA_ACCOUNT_ID'] = 'your_account_id_here'
-
-# Finnhub API (for economic calendar)
-os.environ['FINNHUB_API_KEY'] = 'your_finnhub_api_key_here'
-```
-
-**Important**: Keep this cell private or use Kaggle Secrets!
-
-### Step 6: Test Installation
-```python
-# Verify all imports work
-import torch
-import xgboost as xgb
-import talib
-import transformers
+!cd /kaggle/working && git clone https://github.com/Morriase/Macro-Technical-Sentiment-Classifier.git
+!cd /kaggle/working/Macro-Technical-Sentiment-Classifier && pip install -q finnhub-python python-dotenv
+!cd /kaggle/working/Macro-Technical-Sentiment-Classifier && python main.py
 from src.models.lstm_model import LSTMSequenceModel
 from src.models.hybrid_ensemble import HybridEnsemble
 
