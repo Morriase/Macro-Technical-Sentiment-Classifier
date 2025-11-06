@@ -110,8 +110,8 @@ class HybridEnsemble:
         self.is_fitted = False
         self.feature_importance_ = None
 
-        logger.info(
-            "Hybrid Ensemble initialized: XGBoost + LSTM + XGBoost Meta")
+        # Reduced logging for cleaner output
+        # logger.info("Hybrid Ensemble initialized: XGBoost + LSTM + XGBoost Meta")
 
     def generate_out_of_fold_predictions(
         self, X: np.ndarray, y: np.ndarray
@@ -128,7 +128,7 @@ class HybridEnsemble:
             Tuple of (xgb_oof_proba, lstm_oof_proba)
             Each has shape (n_samples, n_classes)
         """
-        logger.info(f"Generating OOF predictions with {self.n_folds} folds")
+        # logger.info(f"Generating OOF predictions with {self.n_folds} folds")
 
         n_samples, n_features = X.shape
         n_classes = 3
@@ -143,7 +143,9 @@ class HybridEnsemble:
         )
 
         for fold_idx, (train_idx, val_idx) in enumerate(skf.split(X, y)):
-            logger.info(f"Processing fold {fold_idx + 1}/{self.n_folds}")
+            # Only log every other fold to reduce clutter
+            if fold_idx == 0 or (fold_idx + 1) == self.n_folds:
+                logger.info(f"Processing fold {fold_idx + 1}/{self.n_folds}")
 
             X_train_fold = X[train_idx]
             y_train_fold = y[train_idx]
@@ -180,9 +182,11 @@ class HybridEnsemble:
 
             lstm_oof_proba[val_idx] = lstm_proba_fold
 
-            logger.info(f"Fold {fold_idx + 1} completed")
+            # Only log first and last fold
+            if fold_idx == 0 or (fold_idx + 1) == self.n_folds:
+                logger.info(f"Fold {fold_idx + 1}/{self.n_folds} completed")
 
-        logger.info("OOF predictions generation completed")
+        # logger.info("OOF predictions generation completed")
         return xgb_oof_proba, lstm_oof_proba
 
     def fit(
@@ -201,8 +205,8 @@ class HybridEnsemble:
             X_val: Validation features (optional)
             y_val: Validation labels (optional)
         """
-        logger.info("Training Hybrid Ensemble")
-        logger.info(f"Training samples: {len(X)}, Features: {X.shape[1]}")
+        # logger.info("Training Hybrid Ensemble")
+        # logger.info(f"Training samples: {len(X)}, Features: {X.shape[1]}")
 
         # Scale features
         X_scaled = self.scaler.fit_transform(X)
