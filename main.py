@@ -489,8 +489,9 @@ class ForexClassifierPipeline:
 
 
 def main():
-    """Main entry point - Train models for all currency pairs"""
-    from src.config import CURRENCY_PAIRS
+    """Main entry point - Train models for all currency pairs and aggregate signals"""
+    from src.config import CURRENCY_PAIRS, RESULTS_DIR
+    from src.models.portfolio_ensemble import PortfolioEnsemble
 
     all_results = {}
 
@@ -534,6 +535,56 @@ def main():
     if failed:
         logger.warning(f"Failed: {len(failed)} pairs")
         logger.warning(f"  - {', '.join(failed)}")
+
+    # Generate portfolio-level signals if we have successful predictions
+    if successful:
+        logger.info(f"\n{'='*80}")
+        logger.info("GENERATING PORTFOLIO-LEVEL SIGNALS")
+        logger.info(f"{'='*80}\n")
+
+        try:
+            # Create portfolio ensemble
+            portfolio = PortfolioEnsemble()
+
+            # Add predictions from each successful pair
+            for pair in successful:
+                predictions = all_results[pair]
+                portfolio.add_pair_prediction(pair, predictions)
+
+            # Get aggregate signals (minimum 3 pairs must agree, 60% confidence)
+            portfolio_signals = portfolio.get_aggregate_signals(
+                min_confidence=0.60,
+                min_agreement=3
+            )
+
+            # Save portfolio signals
+            portfolio_output = RESULTS_DIR / "portfolio_signals.csv"
+            portfolio.save_portfolio_signals(
+                portfolio_signals,
+                str(portfolio_output)
+            )
+
+            # Display statistics
+            logger.info("\nPortfolio Statistics:")
+            stats = portfolio.get_portfolio_statistics(portfolio_signals)
+            logger.info(f"  Total Signals: {stats['total_signals']}")
+            logger.info(f"  Buy: {stats['buy_pct']:.1f}%")
+            logger.info(f"  Sell: {stats['sell_pct']:.1f}%")
+            logger.info(f"  Hold: {stats['hold_pct']:.1f}%")
+            logger.info(f"  Avg Confidence: {stats['avg_confidence']:.2f}")
+
+            # Display correlation matrix
+            logger.info("\nCurrency Pair Correlation Matrix:")
+            corr_matrix = portfolio.get_correlation_matrix()
+            logger.info(f"\n{corr_matrix.to_string()}")
+
+            logger.success(
+                f"\n✓ Portfolio signals saved to: {portfolio_output}")
+            logger.info(f"\nLatest Portfolio Signals:")
+            logger.info(portfolio_signals.tail(10))
+
+        except Exception as e:
+            logger.error(f"✗ Portfolio signal generation failed: {e}")
 
     return all_results
 
