@@ -142,8 +142,8 @@ WFO_CONFIG = {
 
 # Hyperparameter Optimization
 OPTUNA_CONFIG = {
-    "n_trials": 100,
-    "timeout": 7200,  # 2 hours
+    "n_trials": 8,  # Reduced from 100 - sufficient for convergence
+    "timeout": 3600,  # 1 hour
     "n_jobs": -1,
     "optimization_metric": "profit_factor",  # or "sharpe_ratio"
 }
