@@ -331,13 +331,20 @@ class LSTMSequenceModel:
 
             avg_loss = total_loss / (len(indices) / self.batch_size)
 
-            # Compute training accuracy on full training set for monitoring
+            # Compute training accuracy on a sample (to avoid OOM on large datasets)
+            # Use last batch for efficiency
             self.model.eval()
             with torch.no_grad():
-                train_logits = self.model(X_train_tensor)
+                # Sample up to 1000 random indices to estimate train accuracy
+                sample_size = min(1000, len(X_train_tensor))
+                sample_indices = torch.randperm(
+                    len(X_train_tensor))[:sample_size]
+                X_sample = X_train_tensor[sample_indices]
+                y_sample = y_train_tensor[sample_indices]
+
+                train_logits = self.model(X_sample)
                 train_preds = torch.argmax(train_logits, dim=1)
-                train_acc = (
-                    train_preds == y_train_tensor).float().mean().item()
+                train_acc = (train_preds == y_sample).float().mean().item()
 
             # Record training metrics
             self.train_losses.append(avg_loss)
