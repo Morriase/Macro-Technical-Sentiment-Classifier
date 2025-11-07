@@ -240,6 +240,7 @@ class LSTMSequenceModel:
         y: np.ndarray,
         X_val: Optional[np.ndarray] = None,
         y_val: Optional[np.ndarray] = None,
+        save_plots_path: Optional[str] = None,
     ):
         """
         Train LSTM model
@@ -272,6 +273,12 @@ class LSTMSequenceModel:
         else:
             X_val_tensor = None
             y_val_tensor = None
+
+        # Initialize histories for diagnostics
+        self.train_losses = []
+        self.val_losses = []
+        self.train_accs = []
+        self.val_accs = []
 
         # Loss and optimizer
         criterion = nn.CrossEntropyLoss()
@@ -324,18 +331,37 @@ class LSTMSequenceModel:
 
             avg_loss = total_loss / (len(indices) / self.batch_size)
 
+            # Compute training accuracy on full training set for monitoring
+            self.model.eval()
+            with torch.no_grad():
+                train_logits = self.model(X_train_tensor)
+                train_preds = torch.argmax(train_logits, dim=1)
+                train_acc = (
+                    train_preds == y_train_tensor).float().mean().item()
+
+            # Record training metrics
+            self.train_losses.append(avg_loss)
+            self.train_accs.append(train_acc)
+
             # Validation
             if X_val_tensor is not None:
                 self.model.eval()
                 with torch.no_grad():
                     val_outputs = self.model(X_val_tensor)
                     val_loss = criterion(val_outputs, y_val_tensor).item()
+                    val_preds = torch.argmax(val_outputs, dim=1)
+                    val_acc = (val_preds == y_val_tensor).float().mean().item()
+
+                # Record validation metrics
+                self.val_losses.append(val_loss)
+                self.val_accs.append(val_acc)
 
                 # Only log every 10 epochs or at early stopping
                 if (epoch + 1) % 10 == 0:
                     logger.info(
                         f"Epoch {epoch+1}/{self.epochs} - "
-                        f"Loss: {avg_loss:.4f}, Val Loss: {val_loss:.4f}"
+                        f"Loss: {avg_loss:.4f}, Val Loss: {val_loss:.4f}, "
+                        f"Train Acc: {train_acc:.4f}, Val Acc: {val_acc:.4f}"
                     )
 
                 # Early stopping
@@ -355,6 +381,13 @@ class LSTMSequenceModel:
 
         self.is_fitted = True
         # logger.info("LSTM training completed")
+
+        # Optionally save training curves (loss & accuracy)
+        if save_plots_path is not None:
+            try:
+                self._save_training_plots(save_plots_path)
+            except Exception as e:
+                logger.warning(f"Failed to save training plots: {e}")
 
     def predict_proba(self, X: np.ndarray) -> np.ndarray:
         """
@@ -426,6 +459,51 @@ class LSTMSequenceModel:
             _, hidden = self.model(X_tensor, return_hidden=True)
 
         return hidden.cpu().numpy()
+
+    def _save_training_plots(self, out_prefix: str):
+        """Save loss and accuracy curves to files with given prefix.
+
+        Args:
+            out_prefix: Path prefix (without extension) where plots will be saved.
+                        Two files will be created: <out_prefix>_loss.png and
+                        <out_prefix>_acc.png
+        """
+        try:
+            import matplotlib
+            matplotlib.use('Agg')
+            import matplotlib.pyplot as plt
+        except Exception:
+            raise RuntimeError("matplotlib not available in environment")
+
+        # Loss curve
+        plt.figure(figsize=(8, 5))
+        if hasattr(self, 'train_losses') and len(self.train_losses) > 0:
+            plt.plot(self.train_losses, label='Train Loss')
+        if hasattr(self, 'val_losses') and len(self.val_losses) > 0:
+            plt.plot(self.val_losses, label='Val Loss')
+        plt.xlabel('Epoch')
+        plt.ylabel('Loss')
+        plt.title('LSTM Loss Curve')
+        plt.legend()
+        plt.grid(True)
+        loss_path = f"{out_prefix}_loss.png"
+        plt.savefig(loss_path, bbox_inches='tight')
+        plt.close()
+
+        # Accuracy curve
+        plt.figure(figsize=(8, 5))
+        if hasattr(self, 'train_accs') and len(self.train_accs) > 0:
+            plt.plot(self.train_accs, label='Train Acc')
+        if hasattr(self, 'val_accs') and len(self.val_accs) > 0:
+            plt.plot(self.val_accs, label='Val Acc')
+        plt.xlabel('Epoch')
+        plt.ylabel('Accuracy')
+        plt.title('LSTM Accuracy Curve')
+        plt.legend()
+        plt.grid(True)
+        acc_path = f"{out_prefix}_acc.png"
+        plt.savefig(acc_path, bbox_inches='tight')
+        plt.close()
 
     def save_model(self, filepath: str):
         """Save model to disk"""
