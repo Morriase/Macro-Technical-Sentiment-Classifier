@@ -3,21 +3,12 @@ Main Pipeline for Macro-Technical Sentiment Forex Classifier
 End-to-end training and prediction workflow
 Optimized for both local and Kaggle (GPU/CUDA) environments
 """
-from src.validation.walk_forward import WalkForwardOptimizer
-from src.models.hybrid_ensemble import HybridEnsemble
-from src.feature_engineering.sentiment_features import SentimentAnalyzer
-from src.feature_engineering.technical_features import TechnicalFeatureEngineer
-from src.data_acquisition.kaggle_loader import KaggleFXDataLoader
-
-# Optional imports for local environment (not needed on Kaggle)
-try:
-    from src.data_acquisition.macro_data import MacroDataAcquisition
-    from src.data_acquisition.fx_data import FXDataAcquisition
-    HAS_API_SOURCES = True
-except ImportError:
-    HAS_API_SOURCES = False
-    MacroDataAcquisition = None
-    FXDataAcquisition = None
+import sys
+from loguru import logger
+from pathlib import Path
+from datetime import datetime, timedelta
+import numpy as np
+import pandas as pd
 from src.config import (
     CURRENCY_PAIRS,
     PRIMARY_PAIR,
@@ -31,12 +22,25 @@ from src.config import (
     USE_CUDA,
     DEVICE,
 )
-import pandas as pd
-import numpy as np
-from datetime import datetime, timedelta
-from pathlib import Path
-from loguru import logger
-import sys
+from src.data_acquisition.kaggle_loader import KaggleFXDataLoader
+from src.feature_engineering.technical_features import TechnicalFeatureEngineer
+from src.feature_engineering.sentiment_features import SentimentAnalyzer
+from src.models.hybrid_ensemble import HybridEnsemble
+from src.validation.walk_forward import WalkForwardOptimizer
+import warnings
+warnings.filterwarnings('ignore', category=FutureWarning)
+warnings.filterwarnings('ignore', category=RuntimeWarning)
+
+
+# Optional imports for local environment (not needed on Kaggle)
+try:
+    from src.data_acquisition.macro_data import MacroDataAcquisition
+    from src.data_acquisition.fx_data import FXDataAcquisition
+    HAS_API_SOURCES = True
+except ImportError:
+    HAS_API_SOURCES = False
+    MacroDataAcquisition = None
+    FXDataAcquisition = None
 
 # Add src to path
 sys.path.append(str(Path(__file__).parent))
@@ -204,7 +208,6 @@ class ForexClassifierPipeline:
             raise ValueError("Price data not loaded. Run fetch_data() first.")
 
         # Technical features
-        logger.info("Calculating technical features")
         self.df_features = self.tech_engineer.calculate_all_features(
             self.df_price.copy())
         self.df_features = self.tech_engineer.calculate_feature_crosses(
@@ -212,14 +215,11 @@ class ForexClassifierPipeline:
 
         # Macro features (temporal proximity)
         if self.df_events is not None and not self.df_events.empty and self.macro_data:
-            logger.info("Calculating macro proximity features")
             self.df_features = self.macro_data.calculate_temporal_proximity(
                 events_df=self.df_events,
                 price_df=self.df_features,
             )
         else:
-            logger.warning(
-                "No macro events available or macro_data not initialized")
             self.df_features["tau_pre"] = 0.0
             self.df_features["tau_post"] = 0.0
             self.df_features["weighted_surprise"] = 0.0
@@ -227,10 +227,9 @@ class ForexClassifierPipeline:
         # Drop NaN
         initial_len = len(self.df_features)
         self.df_features.dropna(inplace=True)
-        logger.info(
-            f"Features engineered. Dropped {initial_len - len(self.df_features)} rows with NaN")
 
-        logger.info(f"Total features: {len(self.df_features.columns)}")
+        logger.info(
+            f"✓ {len(self.df_features.columns)} features created, {len(self.df_features)} samples ready")
 
     def create_target(
         self,
