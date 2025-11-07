@@ -36,8 +36,6 @@ class TechnicalFeatureEngineer:
         Returns:
             DataFrame with all technical features
         """
-        logger.info("Calculating technical features")
-
         df = df.copy()
 
         # Ensure OHLCV columns exist
@@ -55,10 +53,7 @@ class TechnicalFeatureEngineer:
         df = self._calculate_returns(df)
 
         # Drop NaN rows created by indicators
-        initial_len = len(df)
         df.dropna(inplace=True)
-        logger.info(
-            f"Technical features calculated. Dropped {initial_len - len(df)} rows with NaN")
 
         return df
 
@@ -235,8 +230,6 @@ class TechnicalFeatureEngineer:
         Calculate interaction features (crosses between indicators)
         Captures complex market states
         """
-        logger.info("Calculating feature crosses")
-
         # RSI × ATR (momentum during high volatility)
         if "rsi_norm" in df.columns and "atr_zscore" in df.columns:
             df["rsi_atr_cross"] = df["rsi_norm"] * df["atr_zscore"]

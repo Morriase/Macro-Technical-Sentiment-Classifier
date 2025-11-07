@@ -2,16 +2,17 @@
 NLP Sentiment Analysis Pipeline for Financial News
 Uses FinBERT for currency-pair differential sentiment analysis
 """
+from src.config import SENTIMENT_MODEL, SENTIMENT_EMA_PERIODS, LDA_NUM_TOPICS
+from gensim.corpora import Dictionary
+from gensim.models import LdaModel
+from loguru import logger
+import torch
+from transformers import AutoTokenizer, AutoModelForSequenceClassification, pipeline
 import pandas as pd
 import numpy as np
 from typing import List, Dict, Optional, Tuple
-from transformers import AutoTokenizer, AutoModelForSequenceClassification, pipeline
-import torch
-from loguru import logger
-from gensim.models import LdaModel
-from gensim.corpora import Dictionary
-
-from src.config import SENTIMENT_MODEL, SENTIMENT_EMA_PERIODS, LDA_NUM_TOPICS
+import os
+os.environ['TRANSFORMERS_VERBOSITY'] = 'error'
 
 
 class SentimentAnalyzer:
