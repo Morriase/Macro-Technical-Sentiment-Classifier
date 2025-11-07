@@ -491,49 +491,50 @@ class ForexClassifierPipeline:
 def main():
     """Main entry point - Train models for all currency pairs"""
     from src.config import CURRENCY_PAIRS
-    
+
     all_results = {}
-    
+
     for pair in CURRENCY_PAIRS:
         logger.info(f"\n{'='*80}")
         logger.info(f"STARTING TRAINING FOR {pair}")
         logger.info(f"{'='*80}\n")
-        
+
         try:
             pipeline = ForexClassifierPipeline(currency_pair=pair)
-            
+
             # Run full pipeline
             predictions = pipeline.run_full_pipeline(
                 years_history=5,
                 use_walk_forward=True,
             )
-            
+
             all_results[pair] = predictions
-            
+
             logger.success(f"✓ {pair} training completed successfully")
             logger.info(f"\nLatest {pair} Predictions:")
             logger.info(predictions.tail(5))
-            
+
         except Exception as e:
             logger.error(f"✗ {pair} training failed: {e}")
             all_results[pair] = None
-    
+
     # Summary
     logger.info(f"\n{'='*80}")
     logger.info("TRAINING SUMMARY")
     logger.info(f"{'='*80}")
-    
-    successful = [pair for pair, result in all_results.items() if result is not None]
+
+    successful = [pair for pair, result in all_results.items()
+                  if result is not None]
     failed = [pair for pair, result in all_results.items() if result is None]
-    
+
     logger.info(f"Successful: {len(successful)}/{len(CURRENCY_PAIRS)} pairs")
     if successful:
         logger.info(f"  - {', '.join(successful)}")
-    
+
     if failed:
         logger.warning(f"Failed: {len(failed)} pairs")
         logger.warning(f"  - {', '.join(failed)}")
-    
+
     return all_results
 
 
