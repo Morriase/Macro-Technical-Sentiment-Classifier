@@ -47,8 +47,9 @@ class SentimentAnalyzer:
                 truncation=True,
             )
             logger.info("Sentiment model loaded successfully")
-        except Exception as e:
-            logger.error(f"Failed to load sentiment model: {e}")
+        except Exception:
+            logger.warning(
+                "FinBERT sentiment model failed to load. Proceeding without sentiment features.")
             self.sentiment_pipeline = None
 
     def analyze_text(self, text: str) -> Dict[str, float]:

@@ -142,10 +142,12 @@ class HybridEnsemble:
             n_splits=self.n_folds, shuffle=True, random_state=self.random_state
         )
 
+        # logger.info(f"Generating OOF predictions with {self.n_folds} folds...")
         for fold_idx, (train_idx, val_idx) in enumerate(skf.split(X, y)):
-            # Only log every other fold to reduce clutter
+            # Only log first and last fold to reduce clutter
             if fold_idx == 0 or (fold_idx + 1) == self.n_folds:
-                logger.info(f"Processing fold {fold_idx + 1}/{self.n_folds}")
+                logger.info(
+                    f"OOF prediction on fold {fold_idx + 1}/{self.n_folds}")
 
             X_train_fold = X[train_idx]
             y_train_fold = y[train_idx]
