@@ -137,7 +137,7 @@ WFO_CONFIG = {
     "test_window_months": 2,  # Out-of-sample period
     "step_months": 2,  # Rolling step size
     "min_train_samples": 5000,
-    "cv_folds": 5,  # For nested cross-validation
+    "cv_folds": 3,  # Reduced from 5 for faster training
 }
 
 # Hyperparameter Optimization
