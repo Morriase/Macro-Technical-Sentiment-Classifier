@@ -294,6 +294,14 @@ class HybridEnsemble:
         xgb_proba = self.xgb_base.predict_proba(X_scaled)
         lstm_proba = self.lstm_base.predict_proba(X_scaled)
 
+        # Handle LSTM sequence length mismatch (drops first sequence_length-1 samples)
+        if len(lstm_proba) < len(xgb_proba):
+            n_missing = len(xgb_proba) - len(lstm_proba)
+            n_classes = lstm_proba.shape[1]
+            # Pad with uniform probabilities for missing samples
+            uniform_proba = np.full((n_missing, n_classes), 1.0 / n_classes)
+            lstm_proba = np.vstack([uniform_proba, lstm_proba])
+
         # Concatenate for meta-learner
         meta_features = np.hstack([xgb_proba, lstm_proba])
 
