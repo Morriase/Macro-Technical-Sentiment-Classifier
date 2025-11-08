@@ -197,6 +197,7 @@ class HybridEnsemble:
         y: np.ndarray,
         X_val: Optional[np.ndarray] = None,
         y_val: Optional[np.ndarray] = None,
+        save_plots_path: Optional[str] = None,
     ):
         """
         Train the hybrid ensemble
@@ -206,6 +207,7 @@ class HybridEnsemble:
             y: Training labels
             X_val: Validation features (optional)
             y_val: Validation labels (optional)
+            save_plots_path: Path prefix for saving training plots (optional)
         """
         # logger.info("Training Hybrid Ensemble")
         # logger.info(f"Training samples: {len(X)}, Features: {X.shape[1]}")
@@ -237,9 +239,9 @@ class HybridEnsemble:
         )
 
         if X_val is not None and y_val is not None:
-            self.lstm_base.fit(X_scaled, y, X_val_scaled, y_val)
+            self.lstm_base.fit(X_scaled, y, X_val_scaled, y_val, save_plots_path=save_plots_path)
         else:
-            self.lstm_base.fit(X_scaled, y)
+            self.lstm_base.fit(X_scaled, y, save_plots_path=save_plots_path)
 
         # Step 3: Prepare meta-features (OOF predictions)
         # Concatenate probability predictions from both base learners
@@ -254,6 +256,14 @@ class HybridEnsemble:
             # Generate meta-features for validation set
             xgb_val_proba = self.xgb_base.predict_proba(X_val_scaled)
             lstm_val_proba = self.lstm_base.predict_proba(X_val_scaled)
+            
+            # Handle LSTM sequence length mismatch (padding fix)
+            if len(xgb_val_proba) != len(lstm_val_proba):
+                n_missing = len(xgb_val_proba) - len(lstm_val_proba)
+                n_classes = lstm_val_proba.shape[1]
+                uniform_proba = np.full((n_missing, n_classes), 1.0 / n_classes)
+                lstm_val_proba = np.vstack([uniform_proba, lstm_val_proba])
+            
             meta_features_val = np.hstack([xgb_val_proba, lstm_val_proba])
 
             self.meta_classifier.fit(
