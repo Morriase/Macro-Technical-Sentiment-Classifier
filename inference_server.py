@@ -8,9 +8,11 @@ Architecture:
 - Server validates features match model schema
 - Server returns predictions with confidence scores
 """
-from src.config import MODELS_DIR, CURRENCY_PAIRS
+from src.config import MODELS_DIR, CURRENCY_PAIRS, SENTIMENT_EMA_PERIODS, ENABLE_LIVE_SENTIMENT, SENTIMENT_CACHE_MINUTES
 from src.feature_engineering.technical_features import TechnicalFeatureEngineer
 from src.data_acquisition.macro_data import MacroDataAcquisition
+from src.data_acquisition.news_data import NewsDataAcquisition
+from src.feature_engineering.sentiment_features import SentimentAnalyzer
 from src.models.hybrid_ensemble import HybridEnsemble
 from flask import Flask, request, jsonify
 import numpy as np
@@ -19,7 +21,7 @@ import json
 import joblib
 from pathlib import Path
 from loguru import logger
-from datetime import datetime
+from datetime import datetime, timedelta
 import sys
 
 # Add project root
@@ -38,6 +40,8 @@ MODELS = {}
 FEATURE_SCHEMAS = {}
 TECH_ENGINEER = TechnicalFeatureEngineer()
 MACRO_ENGINEER = MacroDataAcquisition()  # For macro feature engineering
+NEWS_ACQUIRER = NewsDataAcquisition()  # For live news acquisition
+SENTIMENT_ANALYZER = SentimentAnalyzer()  # For live sentiment analysis
 
 
 def load_model_and_schema(pair: str):
@@ -309,11 +313,80 @@ def predict():
         # Engineer macro features (3 features: tau_pre, tau_post, weighted_surprise)
         df_features = engineer_macro_features(events_data, df_features)
 
+        # Engineer sentiment features (live with caching)
+        if ENABLE_LIVE_SENTIMENT:
+            logger.info("Live sentiment enabled - checking cache...")
+
+            # Check cache first (cache stored on predict function object)
+            if not hasattr(predict, '_sentiment_cache') or \
+               not hasattr(predict, '_sentiment_cache_time') or \
+               (datetime.now() - predict._sentiment_cache_time).total_seconds() > SENTIMENT_CACHE_MINUTES * 60:
+
+                logger.info("Cache miss or expired - fetching live news...")
+                end_date = datetime.now()
+                start_date = end_date - timedelta(hours=2)
+                live_news_df = NEWS_ACQUIRER.fetch_forex_news(
+                    start_date, end_date)
+
+                if not live_news_df.empty:
+                    logger.info(
+                        f"Processing {len(live_news_df)} live news articles for sentiment.")
+                    daily_sentiment = SENTIMENT_ANALYZER.aggregate_daily_sentiment(
+                        live_news_df)
+                    time_weighted_sentiment = SENTIMENT_ANALYZER.calculate_time_weighted_sentiment(
+                        daily_sentiment)
+
+                    # Cache the sentiment data
+                    predict._sentiment_cache = time_weighted_sentiment
+                    predict._sentiment_cache_time = datetime.now()
+                    logger.success("✓ Sentiment cached for future requests")
+                else:
+                    logger.warning("⚠ No live news found - caching zeros")
+                    # Cache zeros to avoid repeated API calls
+                    time_weighted_sentiment = pd.DataFrame()
+                    predict._sentiment_cache = time_weighted_sentiment
+                    predict._sentiment_cache_time = datetime.now()
+            else:
+                logger.info(
+                    f"Using cached sentiment (age: {(datetime.now() - predict._sentiment_cache_time).seconds}s)")
+                time_weighted_sentiment = predict._sentiment_cache
+
+            # Merge sentiment if we have data
+            if not time_weighted_sentiment.empty:
+                # Reset index to merge on 'date' column, then restore index
+                df_features = df_features.reset_index()
+                df_features = pd.merge(
+                    df_features,
+                    time_weighted_sentiment,
+                    left_on="date",
+                    right_on="date",
+                    how="left"
+                )
+                sentiment_cols = [
+                    col for col in time_weighted_sentiment.columns if col != "date"]
+                for col in sentiment_cols:
+                    df_features[col] = df_features[col].fillna(0.0)
+                df_features = df_features.set_index("date")
+                logger.success("✓ Live sentiment features merged")
+            else:
+                # No cached data - add zeros
+                for period in SENTIMENT_EMA_PERIODS:
+                    df_features[f"polarity_ema_{period}"] = 0.0
+                    df_features[f"positive_ema_{period}"] = 0.0
+                    df_features[f"negative_ema_{period}"] = 0.0
+        else:
+            logger.info("Live sentiment disabled - using zero sentinel values")
+            # Add zero sentiment features (faster for production)
+            for period in SENTIMENT_EMA_PERIODS:
+                df_features[f"polarity_ema_{period}"] = 0.0
+                df_features[f"positive_ema_{period}"] = 0.0
+                df_features[f"negative_ema_{period}"] = 0.0
+
         # Extract final feature array
         exclude_cols = [
             "open", "high", "low", "close", "volume",
             "forward_close", "forward_return", "forward_return_pips",
-            "target", "target_class"
+            "target", "target_class", "date"  # Exclude 'date' column from sentiment merge
         ]
         feature_cols = [
             col for col in df_features.columns if col not in exclude_cols]
