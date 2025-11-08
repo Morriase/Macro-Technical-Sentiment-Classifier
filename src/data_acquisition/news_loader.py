@@ -128,9 +128,14 @@ class KaggleNewsLoader:
 
             initial_count = len(df_news)
 
+            # Convert filter dates to timezone-naive if they have timezone info
             if start_date:
+                if hasattr(start_date, 'tz') and start_date.tz is not None:
+                    start_date = start_date.tz_localize(None)
                 df_news = df_news[df_news.index >= start_date]
             if end_date:
+                if hasattr(end_date, 'tz') and end_date.tz is not None:
+                    end_date = end_date.tz_localize(None)
                 df_news = df_news[df_news.index <= end_date]
 
             logger.info(
