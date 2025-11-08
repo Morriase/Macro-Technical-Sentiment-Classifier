@@ -27,20 +27,32 @@ class KaggleNewsLoader:
         """
         self.dataset_name = "miguelaenlle/massive-stock-news-analysis-db-for-nlpbacktests"
 
-        # On Kaggle, use /kaggle/working (writable) instead of /kaggle/input (read-only)
+        # On Kaggle, use the attached input dataset (already available)
         if IS_KAGGLE:
-            self.download_dir = Path("/kaggle/working") / "massive-stock-news"
+            self.download_dir = Path("/kaggle/input/massive-stock-news-analysis-db-for-nlpbacktests")
         else:
             self.download_dir = data_dir / "kaggle_dataset" / "massive-stock-news"
 
         self.news_filepath = self.download_dir / "analyst_ratings_processed.csv"
         logger.info(f"Kaggle News Dataset: {self.dataset_name}")
-        logger.info(f"Kaggle News Download Directory: {self.download_dir}")
+        logger.info(f"Kaggle News Data Directory: {self.download_dir}")
 
     def _download_and_unzip_data(self):
         """
         Downloads and unzips the Kaggle dataset if it doesn't already exist.
+        On Kaggle, the dataset is attached as an input, so no download is needed.
         """
+        # On Kaggle, dataset is already attached - just verify it exists
+        if IS_KAGGLE:
+            if self.news_filepath.exists():
+                logger.info("Using attached Kaggle news dataset.")
+                return
+            else:
+                logger.error(f"News dataset not found at {self.news_filepath}")
+                logger.error("Make sure 'massive-stock-news-analysis-db-for-nlpbacktests' is attached as input!")
+                raise FileNotFoundError(f"News dataset not found at {self.news_filepath}")
+        
+        # Local environment: download if needed
         if self.news_filepath.exists():
             logger.info(
                 "Kaggle news dataset already downloaded and extracted.")
