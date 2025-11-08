@@ -29,7 +29,8 @@ class KaggleNewsLoader:
 
         # On Kaggle, use the attached input dataset (already available)
         if IS_KAGGLE:
-            self.download_dir = Path("/kaggle/input/massive-stock-news-analysis-db-for-nlpbacktests")
+            self.download_dir = Path(
+                "/kaggle/input/massive-stock-news-analysis-db-for-nlpbacktests")
         else:
             self.download_dir = data_dir / "kaggle_dataset" / "massive-stock-news"
 
@@ -49,9 +50,11 @@ class KaggleNewsLoader:
                 return
             else:
                 logger.error(f"News dataset not found at {self.news_filepath}")
-                logger.error("Make sure 'massive-stock-news-analysis-db-for-nlpbacktests' is attached as input!")
-                raise FileNotFoundError(f"News dataset not found at {self.news_filepath}")
-        
+                logger.error(
+                    "Make sure 'massive-stock-news-analysis-db-for-nlpbacktests' is attached as input!")
+                raise FileNotFoundError(
+                    f"News dataset not found at {self.news_filepath}")
+
         # Local environment: download if needed
         if self.news_filepath.exists():
             logger.info(
