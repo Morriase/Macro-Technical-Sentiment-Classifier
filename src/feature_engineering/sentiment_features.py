@@ -39,24 +39,15 @@ class SentimentAnalyzer:
         logger.info(f"Loading sentiment model: {model_name}")
 
         try:
-            # Load model and tokenizer directly (avoids Kaggle httpx version issues with pipeline())
-            from transformers import AutoModelForSequenceClassification, AutoTokenizer
-
-            self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-            self.model = AutoModelForSequenceClassification.from_pretrained(
-                model_name)
-
-            # Move to device
-            if self.device >= 0:
-                self.model = self.model.cuda(self.device)
-            else:
-                self.model = self.model.cpu()
-
-            self.model.eval()
-            self.sentiment_pipeline = None  # Not using pipeline
-
-            logger.success(
-                "✓ Sentiment model loaded successfully (direct loading)")
+            self.sentiment_pipeline = pipeline(
+                "sentiment-analysis",
+                model=model_name,
+                tokenizer=model_name,
+                device=self.device,
+                max_length=512,
+                truncation=True,
+            )
+            logger.success("✓ Sentiment model loaded successfully")
         except Exception as e:
             logger.error(f"FATAL: FinBERT sentiment model failed to load: {e}")
             logger.error(
@@ -73,33 +64,17 @@ class SentimentAnalyzer:
         Returns:
             Dictionary with sentiment scores {positive, negative, neutral}
         """
+        if not self.sentiment_pipeline:
+            return {"positive": 0.0, "negative": 0.0, "neutral": 1.0}
+
         if not text or len(text.strip()) == 0:
             return {"positive": 0.0, "negative": 0.0, "neutral": 1.0}
 
         try:
-            # Tokenize and run inference directly
-            inputs = self.tokenizer(
-                text[:512],  # Limit text length
-                return_tensors="pt",
-                truncation=True,
-                max_length=512,
-                padding=True
-            )
-
-            # Move to device
-            if self.device >= 0:
-                inputs = {k: v.cuda(self.device) for k, v in inputs.items()}
-
-            # Run inference
-            with torch.no_grad():
-                outputs = self.model(**inputs)
-                probs = torch.nn.functional.softmax(outputs.logits, dim=-1)
-                predicted_class = torch.argmax(probs, dim=-1).item()
-                confidence = probs[0][predicted_class].item()
-
-            # FinBERT labels: 0=positive, 1=negative, 2=neutral
-            label_map = {0: "positive", 1: "negative", 2: "neutral"}
-            label = label_map[predicted_class]
+            result = self.sentiment_pipeline(
+                text[:512])[0]  # Limit text length
+            label = result["label"].lower()
+            score = result["score"]
 
             # Convert to probability distribution
             sentiment_scores = {
@@ -108,10 +83,10 @@ class SentimentAnalyzer:
                 "neutral": 0.0,
             }
 
-            sentiment_scores[label] = confidence
+            sentiment_scores[label] = score
 
             # Distribute remaining probability
-            remaining = 1.0 - confidence
+            remaining = 1.0 - score
             for key in sentiment_scores:
                 if key != label:
                     sentiment_scores[key] = remaining / 2
