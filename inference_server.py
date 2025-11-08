@@ -381,12 +381,8 @@ def predict():
                     df_features[f"positive_ema_{period}"] = 0.0
                     df_features[f"negative_ema_{period}"] = 0.0
         else:
-            logger.info("Live sentiment disabled - using zero sentinel values")
-            # Add zero sentiment features (faster for production)
-            for period in SENTIMENT_EMA_PERIODS:
-                df_features[f"polarity_ema_{period}"] = 0.0
-                df_features[f"positive_ema_{period}"] = 0.0
-                df_features[f"negative_ema_{period}"] = 0.0
+            logger.info(
+                "Live sentiment disabled - skipping sentiment features entirely")
 
         # Extract final feature array
         exclude_cols = [
@@ -401,12 +397,19 @@ def predict():
         # Validate features match training schema
         validate_features(feature_cols, schema, pair)
 
-        # Get most recent sample for prediction
-        X_latest = feature_array[-1:, :]  # Last row
+        # For LSTM sequences, we need to pass enough samples for sequence creation
+        # The model internally creates sequences from the data
+        # Pass all available samples and the model will predict on the last sequence
+        X_for_prediction = feature_array  # Pass all samples
 
-        # Predict
-        prediction_class = model.predict(X_latest)[0]
-        prediction_proba = model.predict_proba(X_latest)[0]
+        # Predict - model returns predictions for all valid sequences
+        # We want the last prediction (most recent)
+        prediction_proba = model.predict_proba(X_for_prediction)
+        prediction_class = model.predict(X_for_prediction)
+
+        # Get the last prediction (most recent sequence)
+        prediction_class = prediction_class[-1]
+        prediction_proba = prediction_proba[-1]
 
         # Map class to signal
         class_map = {0: "SELL", 1: "HOLD", 2: "BUY"}
@@ -423,7 +426,7 @@ def predict():
                 'SELL': round(float(prediction_proba[0]), 4),
                 'HOLD': round(float(prediction_proba[1]), 4)
             },
-            'timestamp': df_ohlcv['timestamp'].iloc[-1].isoformat(),
+            'timestamp': df_ohlcv.index[-1].isoformat(),
             'feature_count': len(feature_names),
             'candles_processed': len(df_ohlcv),
             'candles_used': len(feature_array),
@@ -476,11 +479,18 @@ def batch_predict():
             )
             with app_context:
                 response = predict()
-                if response[1] == 200:  # Success
-                    results.append(response[0].get_json())
+                # Handle both Response objects and tuples (response, status_code)
+                if isinstance(response, tuple):
+                    response_obj, status_code = response
+                else:
+                    response_obj = response
+                    status_code = response.status_code
+
+                if status_code == 200:  # Success
+                    results.append(response_obj.get_json())
                 else:
                     results.append(
-                        {'pair': req.get('pair'), 'error': response[0].get_json()})
+                        {'pair': req.get('pair'), 'error': response_obj.get_json()})
 
         return jsonify({'results': results, 'count': len(results)})
 
