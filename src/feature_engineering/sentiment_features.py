@@ -41,20 +41,22 @@ class SentimentAnalyzer:
         try:
             # Load model and tokenizer directly (avoids Kaggle httpx version issues with pipeline())
             from transformers import AutoModelForSequenceClassification, AutoTokenizer
-            
+
             self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-            self.model = AutoModelForSequenceClassification.from_pretrained(model_name)
-            
+            self.model = AutoModelForSequenceClassification.from_pretrained(
+                model_name)
+
             # Move to device
             if self.device >= 0:
                 self.model = self.model.cuda(self.device)
             else:
                 self.model = self.model.cpu()
-            
+
             self.model.eval()
             self.sentiment_pipeline = None  # Not using pipeline
-            
-            logger.success("✓ Sentiment model loaded successfully (direct loading)")
+
+            logger.success(
+                "✓ Sentiment model loaded successfully (direct loading)")
         except Exception as e:
             logger.error(f"FATAL: FinBERT sentiment model failed to load: {e}")
             logger.error(
@@ -83,22 +85,22 @@ class SentimentAnalyzer:
                 max_length=512,
                 padding=True
             )
-            
+
             # Move to device
             if self.device >= 0:
                 inputs = {k: v.cuda(self.device) for k, v in inputs.items()}
-            
+
             # Run inference
             with torch.no_grad():
                 outputs = self.model(**inputs)
                 probs = torch.nn.functional.softmax(outputs.logits, dim=-1)
                 predicted_class = torch.argmax(probs, dim=-1).item()
                 confidence = probs[0][predicted_class].item()
-            
+
             # FinBERT labels: 0=positive, 1=negative, 2=neutral
             label_map = {0: "positive", 1: "negative", 2: "neutral"}
             label = label_map[predicted_class]
-            
+
             # Convert to probability distribution
             sentiment_scores = {
                 "positive": 0.0,
@@ -109,7 +111,7 @@ class SentimentAnalyzer:
             sentiment_scores[label] = confidence
 
             # Distribute remaining probability
-            remaining = 1.0 - score
+            remaining = 1.0 - confidence
             for key in sentiment_scores:
                 if key != label:
                     sentiment_scores[key] = remaining / 2
