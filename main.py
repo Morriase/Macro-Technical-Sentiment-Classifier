@@ -358,9 +358,24 @@ class ForexClassifierPipeline:
             self.model.fit(X_train, y_train)
 
         # Save model
-        model_path = MODELS_DIR / f"{self.currency_pair}_model.pth"
+        model_path = MODELS_DIR / f"{self.currency_pair}_model"
         self.model.save_model(str(model_path))
-        logger.info(f"Model saved to {model_path}")
+        logger.info(f"Model saved to {model_path}_*")
+
+        # Save feature schema separately for inference server (JSON format for easy loading)
+        import json
+        feature_schema = {
+            "currency_pair": self.currency_pair,
+            "n_features": len(feature_cols),
+            "feature_names": feature_cols,
+            "feature_order": {name: idx for idx, name in enumerate(feature_cols)},
+            "model_version": "1.0",
+            "trained_date": datetime.now().isoformat(),
+        }
+        schema_path = MODELS_DIR / f"{self.currency_pair}_feature_schema.json"
+        with open(schema_path, "w") as f:
+            json.dump(feature_schema, f, indent=2)
+        logger.info(f"Feature schema saved to {schema_path}")
 
     def generate_predictions(
         self,
