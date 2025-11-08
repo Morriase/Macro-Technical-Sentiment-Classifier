@@ -40,8 +40,14 @@ MODELS = {}
 FEATURE_SCHEMAS = {}
 TECH_ENGINEER = TechnicalFeatureEngineer()
 MACRO_ENGINEER = MacroDataAcquisition()  # For macro feature engineering
-NEWS_ACQUIRER = NewsDataAcquisition()  # For live news acquisition
-SENTIMENT_ANALYZER = SentimentAnalyzer()  # For live sentiment analysis
+
+# Only load sentiment components if live sentiment is enabled
+if ENABLE_LIVE_SENTIMENT:
+    NEWS_ACQUIRER = NewsDataAcquisition()  # For live news acquisition
+    SENTIMENT_ANALYZER = SentimentAnalyzer()  # For live sentiment analysis
+else:
+    NEWS_ACQUIRER = None
+    SENTIMENT_ANALYZER = None
 
 
 def load_model_and_schema(pair: str):
