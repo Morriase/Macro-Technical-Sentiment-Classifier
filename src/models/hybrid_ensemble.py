@@ -198,6 +198,7 @@ class HybridEnsemble:
         X_val: Optional[np.ndarray] = None,
         y_val: Optional[np.ndarray] = None,
         save_plots_path: Optional[str] = None,
+        feature_names: Optional[List[str]] = None,
     ):
         """
         Train the hybrid ensemble
@@ -208,9 +209,19 @@ class HybridEnsemble:
             X_val: Validation features (optional)
             y_val: Validation labels (optional)
             save_plots_path: Path prefix for saving training plots (optional)
+            feature_names: List of feature column names (CRITICAL for inference alignment)
         """
         # logger.info("Training Hybrid Ensemble")
         # logger.info(f"Training samples: {len(X)}, Features: {X.shape[1]}")
+
+        # Store feature metadata (CRITICAL for inference server validation)
+        self.n_features_ = X.shape[1]
+        self.feature_names_ = feature_names if feature_names is not None else [
+            f"feature_{i}" for i in range(self.n_features_)]
+
+        if len(self.feature_names_) != self.n_features_:
+            raise ValueError(
+                f"Feature names length ({len(self.feature_names_)}) must match X.shape[1] ({self.n_features_})")
 
         # Scale features
         X_scaled = self.scaler.fit_transform(X)
@@ -374,7 +385,7 @@ class HybridEnsemble:
         # Save meta-classifier
         joblib.dump(self.meta_classifier, f"{filepath}_meta.pkl")
 
-        # Save scaler and config
+        # Save scaler and config (INCLUDING FEATURE METADATA - CRITICAL!)
         joblib.dump(
             {
                 "scaler": self.scaler,
@@ -384,6 +395,8 @@ class HybridEnsemble:
                 "n_folds": self.n_folds,
                 "random_state": self.random_state,
                 "feature_importance_": self.feature_importance_,
+                "n_features_": self.n_features_,
+                "feature_names_": self.feature_names_,
             },
             f"{filepath}_config.pkl",
         )
@@ -406,6 +419,10 @@ class HybridEnsemble:
         self.n_folds = config["n_folds"]
         self.random_state = config["random_state"]
         self.feature_importance_ = config["feature_importance_"]
+
+        # Load feature metadata (CRITICAL for inference validation)
+        self.n_features_ = config.get("n_features_", None)
+        self.feature_names_ = config.get("feature_names_", None)
 
         # Load base learners
         self.xgb_base = joblib.load(f"{filepath}_xgb_base.pkl")

@@ -333,7 +333,9 @@ class WalkForwardOptimizer:
             if save_plots_path is not None:
                 fold_plot_path = f"{save_plots_path}_fold{fold_idx + 1}"
 
-            model.fit(X_train, y_train, save_plots_path=fold_plot_path)
+            # Pass feature names for inference server alignment (CRITICAL!)
+            model.fit(X_train, y_train, save_plots_path=fold_plot_path,
+                      feature_names=feature_columns)
 
             # Evaluate on OOS test set
             y_pred = model.predict(X_test)
