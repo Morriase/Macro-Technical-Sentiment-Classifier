@@ -3,13 +3,14 @@ Production Inference Server for Forex Trading Models
 Handles feature engineering, model loading, and predictions
 
 Architecture:
-- EA sends OHLCV data
+- EA sends OHLCV data + raw calendar events
 - Server engineers features using EXACT training pipeline
 - Server validates features match model schema
 - Server returns predictions with confidence scores
 """
 from src.config import MODELS_DIR, CURRENCY_PAIRS
 from src.feature_engineering.technical_features import TechnicalFeatureEngineer
+from src.data_acquisition.macro_data import MacroDataAcquisition
 from src.models.hybrid_ensemble import HybridEnsemble
 from flask import Flask, request, jsonify
 import numpy as np
@@ -36,6 +37,7 @@ logger.add("logs/inference_server.log", rotation="1 day",
 MODELS = {}
 FEATURE_SCHEMAS = {}
 TECH_ENGINEER = TechnicalFeatureEngineer()
+MACRO_ENGINEER = MacroDataAcquisition()  # For macro feature engineering
 
 
 def load_model_and_schema(pair: str):
@@ -82,11 +84,12 @@ def engineer_features_from_ohlcv(df_ohlcv: pd.DataFrame, pair: str) -> tuple:
     logger.info(
         f"Engineering features for {pair} from {len(df_ohlcv)} candles")
 
-    # Technical features
+    # Technical features (55 features)
     df_features = TECH_ENGINEER.calculate_all_features(df_ohlcv.copy())
     df_features = TECH_ENGINEER.calculate_feature_crosses(df_features)
 
-    # Add macro features (set to 0 if no events - same as training)
+    # Macro features (3 features) - will be added after technical features
+    # Placeholder: Will be populated by engineer_macro_features()
     df_features["tau_pre"] = 0.0
     df_features["tau_post"] = 0.0
     df_features["weighted_surprise"] = 0.0
@@ -109,7 +112,76 @@ def engineer_features_from_ohlcv(df_ohlcv: pd.DataFrame, pair: str) -> tuple:
     logger.success(
         f"Engineered {len(feature_cols)} features, {len(df_features)} samples after dropna")
 
-    return df_features[feature_cols].values, feature_cols
+    return df_features, feature_cols  # Return full DataFrame for macro engineering
+
+
+def engineer_macro_features(events_data: list, df_features: pd.DataFrame) -> pd.DataFrame:
+    """
+    Engineer macro features from raw calendar events using EXACT training pipeline
+
+    Args:
+        events_data: List of raw calendar events from EA
+            [
+                {
+                    "timestamp": "2025-11-08T14:30:00",
+                    "event_name": "NFP",
+                    "country": "US",
+                    "actual": 150000,
+                    "forecast": 180000,
+                    "previous": 200000,
+                    "impact": "high"
+                }
+            ]
+        df_features: DataFrame with technical features and index (timestamps)
+
+    Returns:
+        DataFrame with macro features added (tau_pre, tau_post, weighted_surprise)
+    """
+    if not events_data or len(events_data) == 0:
+        logger.info("No calendar events provided - using zero macro features")
+        return df_features
+
+    logger.info(
+        f"Engineering macro features from {len(events_data)} calendar events")
+
+    try:
+        # Convert events to DataFrame with required structure
+        df_events = pd.DataFrame(events_data)
+
+        # Ensure timestamp column is datetime
+        df_events['timestamp'] = pd.to_datetime(df_events['timestamp'])
+
+        # Calculate surprise factor: (actual - forecast) / std(previous values)
+        # This matches the training data calculation
+        if 'actual' in df_events.columns and 'forecast' in df_events.columns:
+            # Simple normalized surprise
+            df_events['surprise_zscore'] = (
+                (df_events['actual'] - df_events['forecast']) /
+                (df_events['previous'].std() + 1e-8)  # Avoid division by zero
+            )
+        else:
+            logger.warning(
+                "Events missing actual/forecast - using zero surprise")
+            df_events['surprise_zscore'] = 0.0
+
+        # Use EXACT same function as training
+        df_features = MACRO_ENGINEER.calculate_temporal_proximity(
+            events_df=df_events,
+            price_df=df_features,
+            pre_event_hours=48,   # Same as training
+            post_event_hours=48,  # Same as training
+            decay_lambda=0.1      # Same as training
+        )
+
+        logger.success(
+            f"Macro features engineered: tau_pre, tau_post, weighted_surprise")
+
+    except Exception as e:
+        logger.error(f"Failed to engineer macro features: {e}")
+        logger.info("Falling back to zero macro features")
+        # Keep the zeros already set
+
+    return df_features
 
 
 def validate_features(feature_names: list, schema: dict, pair: str):
@@ -164,6 +236,17 @@ def predict():
         "ohlcv": [
             {"timestamp": "2025-01-01 00:00:00", "open": 1.1000, "high": 1.1010, "low": 1.0990, "close": 1.1005, "volume": 1000},
             ...
+        ],
+        "events": [  // OPTIONAL: Raw calendar events for macro features
+            {
+                "timestamp": "2025-01-01 14:30:00",
+                "event_name": "NFP",
+                "country": "US",
+                "actual": 150000,
+                "forecast": 180000,
+                "previous": 200000,
+                "impact": "high"
+            }
         ]
     }
 
@@ -187,6 +270,7 @@ def predict():
 
         pair = data.get('pair')
         ohlcv_data = data.get('ohlcv')
+        events_data = data.get('events', [])  # Optional calendar events
 
         if not pair or not ohlcv_data:
             return jsonify({'error': 'Missing required fields: pair, ohlcv'}), 400
@@ -195,14 +279,15 @@ def predict():
             return jsonify({'error': f'Unsupported pair: {pair}'}), 400
 
         logger.info(
-            f"Prediction request for {pair} with {len(ohlcv_data)} candles")
+            f"Prediction request for {pair} with {len(ohlcv_data)} candles, {len(events_data)} events")
 
         # Convert OHLCV to DataFrame
         df_ohlcv = pd.DataFrame(ohlcv_data)
         df_ohlcv['timestamp'] = pd.to_datetime(df_ohlcv['timestamp'])
+        df_ohlcv.set_index('timestamp', inplace=True)
 
         # Validate OHLCV data
-        required_cols = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
+        required_cols = ['open', 'high', 'low', 'close', 'volume']
         missing_cols = [
             col for col in required_cols if col not in df_ohlcv.columns]
         if missing_cols:
@@ -217,12 +302,25 @@ def predict():
         # Load model and schema
         model, schema = load_model_and_schema(pair)
 
-        # Engineer features
-        feature_array, feature_names = engineer_features_from_ohlcv(
+        # Engineer technical features (55 features)
+        df_features, feature_names = engineer_features_from_ohlcv(
             df_ohlcv, pair)
 
+        # Engineer macro features (3 features: tau_pre, tau_post, weighted_surprise)
+        df_features = engineer_macro_features(events_data, df_features)
+
+        # Extract final feature array
+        exclude_cols = [
+            "open", "high", "low", "close", "volume",
+            "forward_close", "forward_return", "forward_return_pips",
+            "target", "target_class"
+        ]
+        feature_cols = [
+            col for col in df_features.columns if col not in exclude_cols]
+        feature_array = df_features[feature_cols].values
+
         # Validate features match training schema
-        validate_features(feature_names, schema, pair)
+        validate_features(feature_cols, schema, pair)
 
         # Get most recent sample for prediction
         X_latest = feature_array[-1:, :]  # Last row
@@ -277,8 +375,8 @@ def batch_predict():
     Expected JSON format:
     {
         "requests": [
-            {"pair": "EUR_USD", "ohlcv": [...]},
-            {"pair": "GBP_USD", "ohlcv": [...]}
+            {"pair": "EUR_USD", "ohlcv": [...], "events": [...]},  // events optional
+            {"pair": "GBP_USD", "ohlcv": [...], "events": [...]}
         ]
     }
     """
