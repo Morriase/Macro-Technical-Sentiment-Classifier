@@ -113,11 +113,16 @@ class KaggleNewsLoader:
             # Read only necessary columns to save memory
             df_news = pd.read_csv(
                 self.news_filepath,
-                usecols=['date', 'title'],
-                parse_dates=['date'],
-                dayfirst=False
+                usecols=['date', 'title']
             )
             df_news.rename(columns={'title': 'text'}, inplace=True)
+
+            # Convert date column to datetime (handle string format)
+            df_news['date'] = pd.to_datetime(df_news['date'], errors='coerce')
+
+            # Drop rows with invalid dates
+            df_news = df_news.dropna(subset=['date'])
+
             df_news.set_index('date', inplace=True)
             df_news.sort_index(inplace=True)
 
