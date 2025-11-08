@@ -5,7 +5,7 @@ Uses kagglehub to automatically download the dataset.
 import pandas as pd
 from pathlib import Path
 from loguru import logger
-from src.config import DATA_DIR
+from src.config import DATA_DIR, IS_KAGGLE
 from datetime import datetime
 import kagglehub
 import zipfile
@@ -26,7 +26,13 @@ class KaggleNewsLoader:
             data_dir: Path to the data directory.
         """
         self.dataset_name = "miguelaenlle/massive-stock-news-analysis-db-for-nlpbacktests"
-        self.download_dir = data_dir / "kaggle_dataset" / "massive-stock-news"
+
+        # On Kaggle, use /kaggle/working (writable) instead of /kaggle/input (read-only)
+        if IS_KAGGLE:
+            self.download_dir = Path("/kaggle/working") / "massive-stock-news"
+        else:
+            self.download_dir = data_dir / "kaggle_dataset" / "massive-stock-news"
+
         self.news_filepath = self.download_dir / "analyst_ratings_processed.csv"
         logger.info(f"Kaggle News Dataset: {self.dataset_name}")
         logger.info(f"Kaggle News Download Directory: {self.download_dir}")
@@ -36,21 +42,24 @@ class KaggleNewsLoader:
         Downloads and unzips the Kaggle dataset if it doesn't already exist.
         """
         if self.news_filepath.exists():
-            logger.info("Kaggle news dataset already downloaded and extracted.")
+            logger.info(
+                "Kaggle news dataset already downloaded and extracted.")
             return
 
-        logger.info(f"Downloading dataset '{self.dataset_name}' to '{self.download_dir}'...")
+        logger.info(
+            f"Downloading dataset '{self.dataset_name}' to '{self.download_dir}'...")
         try:
             # Ensure the download directory exists
             self.download_dir.mkdir(parents=True, exist_ok=True)
 
             # Download the dataset
-            path = kagglehub.dataset_download(self.dataset_name, path=self.download_dir)
+            path = kagglehub.dataset_download(
+                self.dataset_name, path=self.download_dir)
 
             # Unzip the file
             with zipfile.ZipFile(path, 'r') as zip_ref:
                 zip_ref.extractall(self.download_dir)
-            
+
             # Remove the zip file after extraction
             os.remove(path)
 
@@ -58,7 +67,8 @@ class KaggleNewsLoader:
 
         except Exception as e:
             logger.error(f"Failed to download or extract Kaggle dataset: {e}")
-            logger.error("Please ensure you have set up your Kaggle API credentials.")
+            logger.error(
+                "Please ensure you have set up your Kaggle API credentials.")
             logger.error("See: https://www.kaggle.com/docs/api")
             raise
 
@@ -78,8 +88,10 @@ class KaggleNewsLoader:
         self._download_and_unzip_data()
 
         if not self.news_filepath.exists():
-            logger.error(f"Kaggle news file not found after download attempt: {self.news_filepath}")
-            raise FileNotFoundError(f"Kaggle news file not found: {self.news_filepath}")
+            logger.error(
+                f"Kaggle news file not found after download attempt: {self.news_filepath}")
+            raise FileNotFoundError(
+                f"Kaggle news file not found: {self.news_filepath}")
 
         logger.info(f"Loading historical news from {self.news_filepath}")
         try:
@@ -101,8 +113,10 @@ class KaggleNewsLoader:
             if end_date:
                 df_news = df_news[df_news.index <= end_date]
 
-            logger.info(f"Loaded {len(df_news)} news articles (filtered from {initial_count} total).")
-            logger.info(f"Date range: {df_news.index.min()} to {df_news.index.max()}")
+            logger.info(
+                f"Loaded {len(df_news)} news articles (filtered from {initial_count} total).")
+            logger.info(
+                f"Date range: {df_news.index.min()} to {df_news.index.max()}")
 
             return df_news
 
