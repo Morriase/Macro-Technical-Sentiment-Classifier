@@ -267,6 +267,7 @@ class WalkForwardOptimizer:
         feature_columns: List[str],
         target_column: str = "target",
         optimize_each_window: bool = True,
+        save_plots_path: Optional[str] = None,
     ) -> List[Dict]:
         """
         Run complete walk-forward optimization
@@ -276,6 +277,7 @@ class WalkForwardOptimizer:
             feature_columns: List of feature column names
             target_column: Target column name
             optimize_each_window: Whether to re-optimize in each window
+            save_plots_path: Optional base path for saving training plots (fold number will be appended)
 
         Returns:
             List of results for each WF window
@@ -325,7 +327,13 @@ class WalkForwardOptimizer:
                 "random_state": self.splitter.min_train_samples,
             }
             model = self.model_class(xgb_params=xgb_params)
-            model.fit(X_train, y_train)
+            
+            # Generate plot path with fold number if base path provided
+            fold_plot_path = None
+            if save_plots_path is not None:
+                fold_plot_path = f"{save_plots_path}_fold{fold_idx + 1}"
+            
+            model.fit(X_train, y_train, save_plots_path=fold_plot_path)
 
             # Evaluate on OOS test set
             y_pred = model.predict(X_test)
