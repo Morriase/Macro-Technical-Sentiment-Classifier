@@ -76,6 +76,11 @@ SENTIMENT_EMA_PERIODS = [3, 7, 14]  # Days for time-weighted sentiment
 MAX_NEWS_PER_DAY = 50
 LDA_NUM_TOPICS = 10  # Latent Dirichlet Allocation topics
 
+# Live Sentiment Configuration (for inference server)
+# Disable by default for performance (adds 1-2s latency)
+ENABLE_LIVE_SENTIMENT = False
+SENTIMENT_CACHE_MINUTES = 5  # Cache duration for live sentiment to reduce API calls
+
 # COT Data Configuration
 COT_FUTURES_CONTRACTS = {
     "EUR": "Euro FX",

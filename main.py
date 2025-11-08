@@ -21,8 +21,10 @@ from src.config import (
     IS_KAGGLE,
     USE_CUDA,
     DEVICE,
+    SENTIMENT_EMA_PERIODS,
 )
 from src.data_acquisition.kaggle_loader import KaggleFXDataLoader
+from src.data_acquisition.news_loader import KaggleNewsLoader
 from src.feature_engineering.technical_features import TechnicalFeatureEngineer
 from src.feature_engineering.sentiment_features import SentimentAnalyzer
 from src.models.hybrid_ensemble import HybridEnsemble
@@ -88,6 +90,7 @@ class ForexClassifierPipeline:
         # Initialize data sources
         if use_kaggle_data:
             self.kaggle_loader = KaggleFXDataLoader()
+            self.kaggle_news_loader = KaggleNewsLoader()
             self.fx_data = None
             # Create MacroDataAcquisition for feature calculations (doesn't need API)
             self.macro_data = MacroDataAcquisition() if (
@@ -100,15 +103,19 @@ class ForexClassifierPipeline:
                     "Install required packages or use Kaggle dataset."
                 )
             self.kaggle_loader = None
+            self.kaggle_news_loader = None
             self.fx_data = FXDataAcquisition()
             self.macro_data = MacroDataAcquisition()
             logger.info("Using OANDA/API data sources")
 
+        # Initialize feature engineers (common to both modes)
         self.tech_engineer = TechnicalFeatureEngineer()
         self.sentiment_analyzer = SentimentAnalyzer()
 
+        # Initialize data storage
         self.df_price = None
         self.df_events = None
+        self.df_news = None
         self.df_features = None
         self.model = None
 
@@ -154,6 +161,17 @@ class ForexClassifierPipeline:
             else:
                 logger.warning(
                     "⚠ No macro events found - training without macro features")
+
+            # Load historical news for sentiment analysis
+            logger.info("Loading historical news for sentiment analysis")
+            self.df_news = self.kaggle_news_loader.load_historical_news(
+                start_date=start_date, end_date=end_date
+            )
+            if self.df_news is not None and not self.df_news.empty:
+                logger.success(f"✓ Loaded {len(self.df_news)} news articles")
+            else:
+                logger.warning(
+                    "⚠ No historical news found - training without sentiment features")
 
             logger.info("✓ Data loaded successfully from Kaggle dataset")
 
@@ -223,6 +241,42 @@ class ForexClassifierPipeline:
             self.df_features["tau_pre"] = 0.0
             self.df_features["tau_post"] = 0.0
             self.df_features["weighted_surprise"] = 0.0
+
+        # Sentiment features
+        if self.df_news is not None and not self.df_news.empty:
+            logger.info("Calculating sentiment features...")
+            daily_sentiment = self.sentiment_analyzer.aggregate_daily_sentiment(
+                self.df_news
+            )
+            time_weighted_sentiment = self.sentiment_analyzer.calculate_time_weighted_sentiment(
+                daily_sentiment
+            )
+            # Merge sentiment features into main df_features
+            # Reset index to merge on 'date' column, then restore index
+            self.df_features = self.df_features.reset_index()
+            self.df_features = pd.merge(
+                self.df_features,
+                time_weighted_sentiment,
+                left_on="date",
+                right_on="date",
+                how="left"
+            )
+            # Fill NaN values that result from merging (e.g., days with no news)
+            sentiment_cols = [
+                col for col in time_weighted_sentiment.columns if col != "date"]
+            for col in sentiment_cols:
+                self.df_features[col] = self.df_features[col].fillna(0.0)
+            # Restore DateTimeIndex
+            self.df_features = self.df_features.set_index("date")
+            logger.success("✓ Sentiment features calculated and merged.")
+        else:
+            logger.warning(
+                "⚠ No historical news for sentiment analysis. Adding zero sentiment features.")
+            # Add placeholder columns for sentiment features if no news is available
+            for period in SENTIMENT_EMA_PERIODS:
+                self.df_features[f"polarity_ema_{period}"] = 0.0
+                self.df_features[f"positive_ema_{period}"] = 0.0
+                self.df_features[f"negative_ema_{period}"] = 0.0
 
         # Drop NaN
         initial_len = len(self.df_features)
@@ -313,7 +367,7 @@ class ForexClassifierPipeline:
         exclude_cols = [
             "open", "high", "low", "close", "volume",
             "forward_close", "forward_return", "forward_return_pips",
-            "target", "target_class"
+            "target", "target_class", "date"  # Exclude 'date' column from sentiment merge
         ]
         feature_cols = [
             col for col in self.df_features.columns

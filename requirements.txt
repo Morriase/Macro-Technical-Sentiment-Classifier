@@ -14,6 +14,7 @@ TA-Lib>=0.4.28
 transformers>=4.30.0
 huggingface-hub>=0.23.0
 tokenizers>=0.13.0
+kagglehub>=0.2.0
 
 # Sentiment Analysis (FinBERT)
 sentencepiece>=0.1.99
