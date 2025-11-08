@@ -61,6 +61,49 @@ def generate_test_ohlcv(n_candles=500, pair="EUR_USD"):
     return ohlcv
 
 
+def generate_test_events(pair="EUR_USD", n_events=5):
+    """
+    Generate mock calendar events for testing macro features
+    """
+    logger.info(f"Generating {n_events} test calendar events for {pair}")
+
+    # Extract currencies from pair
+    currencies = pair.split('_')
+
+    events = []
+    base_time = datetime.now()
+
+    # Generate events: some past (for tau_post), some future (for tau_pre)
+    for i in range(n_events):
+        # Mix of past and future events
+        hours_offset = (i - n_events // 2) * 12  # -24h to +24h range
+        event_time = base_time + timedelta(hours=hours_offset)
+
+        # Random country from pair
+        country = currencies[i % 2]
+
+        # Random event type
+        event_names = ["NFP", "CPI", "Interest Rate", "GDP", "Retail Sales"]
+        event_name = event_names[i % len(event_names)]
+
+        # Generate realistic values with surprise
+        actual = 150000 + np.random.randn() * 20000
+        forecast = 150000 + np.random.randn() * 10000
+        previous = 150000 + np.random.randn() * 15000
+
+        events.append({
+            'timestamp': event_time.strftime('%Y-%m-%d %H:%M:%S'),
+            'event_name': event_name,
+            'country': country,
+            'actual': float(actual),
+            'forecast': float(forecast),
+            'previous': float(previous),
+            'impact': 'high'
+        })
+
+    return events
+
+
 def test_health_check():
     """
     Test /health endpoint
@@ -102,13 +145,16 @@ def test_single_prediction(pair="EUR_USD"):
     try:
         # Generate test data
         ohlcv = generate_test_ohlcv(n_candles=500, pair=pair)
+        events = generate_test_events(pair=pair, n_events=5)
 
         payload = {
             'pair': pair,
-            'ohlcv': ohlcv
+            'ohlcv': ohlcv,
+            'events': events  # Include calendar events for macro features
         }
 
-        logger.info(f"Sending prediction request for {pair}...")
+        logger.info(
+            f"Sending prediction request for {pair} with {len(events)} events...")
         response = requests.post(
             f"{BASE_URL}/predict",
             json=payload,
@@ -263,9 +309,11 @@ def test_batch_prediction():
 
         for pair in pairs:
             ohlcv = generate_test_ohlcv(n_candles=500, pair=pair)
+            events = generate_test_events(pair=pair, n_events=5)
             requests_list.append({
                 'pair': pair,
-                'ohlcv': ohlcv
+                'ohlcv': ohlcv,
+                'events': events
             })
 
         payload = {'requests': requests_list}

@@ -187,6 +187,104 @@ bool IsUpcomingNews(){
    return false;    
 }
 //+------------------------------------------------------------------+
+// Get raw calendar events as JSON for inference server
+string GetCalendarEventsJSON(string pair)
+{
+   // Extract currencies from pair (e.g., EUR_USD -> EUR, USD)
+   string currencies[];
+   StringSplit(pair, '_', currencies);
+   
+   if(ArraySize(currencies) != 2)
+      return "[]";  // Empty array if invalid pair
+   
+   string curr1 = currencies[0];
+   string curr2 = currencies[1];
+   
+   // Get events from last 48 hours (for tau_post) and next 48 hours (for tau_pre)
+   MqlCalendarValue values[]; 
+   datetime start_time = TimeCurrent() - PeriodSeconds(PERIOD_H1) * 48;  // 48 hours ago
+   datetime end_time = TimeCurrent() + PeriodSeconds(PERIOD_H1) * 48;    // 48 hours ahead
+   
+   CalendarValueHistory(values, start_time, end_time, NULL, NULL); 
+   
+   if(ArraySize(values) == 0)
+      return "[]";  // No events
+   
+   string jsonEvents = "[";
+   int eventCount = 0;
+   
+   // Parse keywords for high-impact events
+   string sep = (separator == 0) ? "," : ";";
+   ushort sep_code = StringGetCharacter(sep, 0);
+   string newsToAvoid[];
+   int k = StringSplit(keyNews, sep_code, newsToAvoid);
+   
+   for(int i = 0; i < ArraySize(values); i++)
+   {
+       MqlCalendarEvent event; 
+       CalendarEventById(values[i].event_id, event); 
+       MqlCalendarCountry country; 
+       CalendarCountryById(event.country_id, country); 
+       
+       // Only include events for the pair's currencies
+       if(country.currency != curr1 && country.currency != curr2)
+          continue;
+       
+       // Only include high-impact events that match keywords
+       bool matchesKeyword = false;
+       for(int j = 0; j < k; j++)
+       {
+          if(StringFind(event.name, newsToAvoid[j]) >= 0)
+          {
+             matchesKeyword = true;
+             break;
+          }
+       }
+       
+       if(!matchesKeyword)
+          continue;
+       
+       // Get impact level
+       string impactLevel = "low";
+       switch(event.importance)
+       {
+          case CALENDAR_IMPORTANCE_HIGH:
+             impactLevel = "high";
+             break;
+          case CALENDAR_IMPORTANCE_MODERATE:
+             impactLevel = "medium";
+             break;
+          default:
+             impactLevel = "low";
+             break;
+       }
+       
+       // Add comma between events
+       if(eventCount > 0)
+          jsonEvents += ",";
+       
+       // Build JSON object for this event
+       jsonEvents += "{";
+       jsonEvents += "\"timestamp\":\"" + TimeToString(values[i].time, TIME_DATE|TIME_MINUTES|TIME_SECONDS) + "\",";
+       jsonEvents += "\"event_name\":\"" + event.name + "\",";
+       jsonEvents += "\"country\":\"" + country.currency + "\",";
+       jsonEvents += "\"actual\":" + DoubleToString(values[i].actual_value, 8) + ",";
+       jsonEvents += "\"forecast\":" + DoubleToString(values[i].forecast_value, 8) + ",";
+       jsonEvents += "\"previous\":" + DoubleToString(values[i].prev_value, 8) + ",";
+       jsonEvents += "\"impact\":\"" + impactLevel + "\"";
+       jsonEvents += "}";
+       
+       eventCount++;
+   }
+   
+   jsonEvents += "]";
+   
+   if(eventCount > 0)
+      Print("📊 Sending ", eventCount, " calendar events to server for ", pair);
+   
+   return jsonEvents;
+}
+//+------------------------------------------------------------------+
 // Trailing stoploss
 
 void TrailSL(){

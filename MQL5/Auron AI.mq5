@@ -413,12 +413,25 @@ string PrepareOHLCVData()
       Print("Symbol: ", _Symbol, " → Formatted: ", pairFormatted);
    
    // Build JSON structure matching inference server expectations
-   // Format: {"pair": "EUR_USD", "ohlcv": [{timestamp, open, high, low, close, volume}, ...]}
+   // Format: {"pair": "EUR_USD", "ohlcv": [...], "events": [...]}
    string json = "{";
    json += "\"pair\":\"" + pairFormatted + "\",";
    json += "\"ohlcv\":[";
    json += CollectM5TimeframeData(requiredBars);
-   json += "]}";
+   json += "],";
+   
+   // Add calendar events for macro features (if news filter enabled)
+   if(NewsFilterOn)
+   {
+      json += "\"events\":";
+      json += GetCalendarEventsJSON(pairFormatted);
+   }
+   else
+   {
+      json += "\"events\":[]";  // Empty events array if news filter disabled
+   }
+   
+   json += "}";
    
    return json;
 }
