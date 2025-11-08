@@ -243,7 +243,7 @@ class ForexClassifierPipeline:
             self.df_features["weighted_surprise"] = 0.0
 
         # Sentiment features (REQUIRED - must have 67 features total)
-        if not hasattr(self.sentiment_analyzer, 'model') or self.sentiment_analyzer.model is None:
+        if self.sentiment_analyzer.sentiment_pipeline is None:
             raise RuntimeError(
                 "Sentiment model failed to load - REQUIRED for 67-feature training")
 
