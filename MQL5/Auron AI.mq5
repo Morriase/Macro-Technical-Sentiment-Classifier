@@ -139,15 +139,16 @@ int OnInit()
    ChartSetInteger(0, CHART_SHOW_GRID, false); 
    
    Print("========================================");
-   Print("BLACK ICE EA V2 - MULTI-TIMEFRAME SMC");
+   Print("HYBRID ENSEMBLE EA - MACRO-TECHNICAL SENTIMENT");
    Print("========================================");
    Print("Server: ", RestServerURL);
-   Print("Timeframes: M15 + H1 + H4");
-   Print("Bars per TF: 100");
+   Print("Timeframe: M5 (5-minute candles)");
+   Print("Bars: 250 (for feature engineering)");
+   Print("Features: 58 (55 Technical + 3 Macro)");
    Print("Chart Timeframe: ", EnumToString(PERIOD_CURRENT));
    
    if(UpdateIntervalSeconds == 0)
-      Print("Update Mode: New M15 Bar Only");
+      Print("Update Mode: New M5 Bar Only");
    else
       Print("Update Mode: Every ", updateSeconds, " seconds");
    
@@ -165,7 +166,7 @@ int OnInit()
    // Initialize trade log file
    InitializeTradeLog();
    
-   lastBarTime = iTime(_Symbol, PERIOD_M15, 0);  // Use M15 as base timeframe
+   lastBarTime = iTime(_Symbol, PERIOD_M5, 0);  // Use M5 as base timeframe
    lastUpdateTime = TimeCurrent();
    
    // Make initial prediction if enabled
@@ -214,15 +215,15 @@ void OnTick()
    }
    
    // Two update modes:
-   // 1. New M15 bar only (UpdateIntervalSeconds = 0)
+   // 1. New M5 bar only (UpdateIntervalSeconds = 0)
    // 2. Timer-based (UpdateIntervalSeconds > 0)
    
    bool shouldUpdate = false;
-   datetime currentBarTime = iTime(_Symbol, PERIOD_M15, 0);  // Use M15 as base timeframe
+   datetime currentBarTime = iTime(_Symbol, PERIOD_M5, 0);  // Use M5 as base timeframe
    datetime currentTime = TimeCurrent();
    switch(UpdateIntervalSeconds){
       case 0:
-         // Mode 1: Update on new M15 bar only
+         // Mode 1: Update on new M5 bar only
          if(currentBarTime != lastBarTime){
             lastBarTime = currentBarTime;
             shouldUpdate = true;
@@ -235,7 +236,7 @@ void OnTick()
             shouldUpdate = true;
             
             // Also update lastBarTime to track bar changes
-            lastBarTime = iTime(_Symbol, PERIOD_M15, 0);
+            lastBarTime = iTime(_Symbol, PERIOD_M5, 0);
          }
          break;
    }
@@ -391,76 +392,55 @@ void MakePrediction()
 }
 
 //+------------------------------------------------------------------+
-//| Prepare multi-timeframe JSON data                                |
+//| Prepare M5 OHLCV JSON data for inference server                  |
 //+------------------------------------------------------------------+
 string PrepareOHLCVData()
 {
-   // Check if we have enough bars on all timeframes
-   int barsM15 = Bars(_Symbol, PERIOD_M15);
-   int barsH1 = Bars(_Symbol, PERIOD_H1);
-   int barsH4 = Bars(_Symbol, PERIOD_H4);
+   // Check if we have enough M5 bars (inference server needs 250+ for feature engineering)
+   int barsM5 = Bars(_Symbol, PERIOD_M5);
+   int requiredBars = 250;
    
-   int requiredBars = 250;  // Increased from 100 to 250 for better SMC structure detection
-   
-   if(barsM15 < requiredBars + 10)
+   if(barsM5 < requiredBars + 10)
    {
-      Print("ERROR: Insufficient M15 bars. Need ", requiredBars, ", have ", barsM15);
-      return "";
-   }
-   if(barsH1 < requiredBars + 10)
-   {
-      Print("ERROR: Insufficient H1 bars. Need ", requiredBars, ", have ", barsH1);
-      return "";
-   }
-   if(barsH4 < requiredBars + 10)
-   {
-      Print("ERROR: Insufficient H4 bars. Need ", requiredBars, ", have ", barsH4);
+      Print("ERROR: Insufficient M5 bars. Need ", requiredBars, ", have ", barsM5);
       return "";
    }
    
-   // Build multi-timeframe JSON structure
+   // Convert symbol format: EURUSD → EUR_USD (match training data format)
+   string pairFormatted = ConvertSymbolFormat(_Symbol);
+   
+   if(ShowDebugInfo)
+      Print("Symbol: ", _Symbol, " → Formatted: ", pairFormatted);
+   
+   // Build JSON structure matching inference server expectations
+   // Format: {"pair": "EUR_USD", "ohlcv": [{timestamp, open, high, low, close, volume}, ...]}
    string json = "{";
-   json += "\"symbol\":\"" + _Symbol + "\",";
-   json += "\"data\":{";
-   
-   // M15 data
-   json += "\"M15\":[";
-   json += CollectTimeframeData(PERIOD_M15, requiredBars);
-   json += "],";
-   
-   // H1 data
-   json += "\"H1\":[";
-   json += CollectTimeframeData(PERIOD_H1, requiredBars);
-   json += "],";
-   
-   // H4 data
-   json += "\"H4\":[";
-   json += CollectTimeframeData(PERIOD_H4, requiredBars);
-   json += "]";
-   
-   json += "}}";
+   json += "\"pair\":\"" + pairFormatted + "\",";
+   json += "\"ohlcv\":[";
+   json += CollectM5TimeframeData(requiredBars);
+   json += "]}";
    
    return json;
 }
 
 //+------------------------------------------------------------------+
-//| Collect data for a specific timeframe                            |
+//| Collect M5 OHLCV data                                            |
 //+------------------------------------------------------------------+
-string CollectTimeframeData(ENUM_TIMEFRAMES tf, int bars)
+string CollectM5TimeframeData(int bars)
 {
    string data = "";
    
    for(int i = bars - 1; i >= 0; i--)
    {
-      datetime time = iTime(_Symbol, tf, i);
-      double open = iOpen(_Symbol, tf, i);
-      double high = iHigh(_Symbol, tf, i);
-      double low = iLow(_Symbol, tf, i);
-      double close = iClose(_Symbol, tf, i);
-      long volume = iVolume(_Symbol, tf, i);
+      datetime time = iTime(_Symbol, PERIOD_M5, i);
+      double open = iOpen(_Symbol, PERIOD_M5, i);
+      double high = iHigh(_Symbol, PERIOD_M5, i);
+      double low = iLow(_Symbol, PERIOD_M5, i);
+      double close = iClose(_Symbol, PERIOD_M5, i);
+      long volume = iVolume(_Symbol, PERIOD_M5, i);
       
       data += "{";
-      data += "\"time\":\"" + TimeToString(time, TIME_DATE|TIME_MINUTES) + "\",";
+      data += "\"timestamp\":\"" + TimeToString(time, TIME_DATE|TIME_MINUTES) + "\",";
       data += "\"open\":" + DoubleToString(open, _Digits) + ",";
       data += "\"high\":" + DoubleToString(high, _Digits) + ",";
       data += "\"low\":" + DoubleToString(low, _Digits) + ",";
@@ -472,6 +452,24 @@ string CollectTimeframeData(ENUM_TIMEFRAMES tf, int bars)
    }
    
    return data;
+}
+
+//+------------------------------------------------------------------+
+//| Convert symbol format: EURUSD → EUR_USD                          |
+//+------------------------------------------------------------------+
+string ConvertSymbolFormat(string symbol)
+{
+   // Handle standard forex symbols
+   if(StringLen(symbol) >= 6)
+   {
+      // Extract first 6 characters for forex pairs (ignores suffix like .ecn, .raw, etc.)
+      string base = StringSubstr(symbol, 0, 3);
+      string quote = StringSubstr(symbol, 3, 3);
+      return base + "_" + quote;
+   }
+   
+   // Fallback: return as-is
+   return symbol;
 }
 
 //+------------------------------------------------------------------+
@@ -509,143 +507,95 @@ void ParseAndExecute(string response)
       return;
    }
    
-   // Simple JSON parsing (production would use proper JSON library)
-   int prediction = -1;
+   // Parse inference server response format:
+   // {"prediction": "BUY", "confidence": 0.85, "probabilities": {"SELL": 0.05, "HOLD": 0.10, "BUY": 0.85}}
+   
+   string signal = "";
    double confidence = 0.0;
    double prob_sell = 0.0;
    double prob_hold = 0.0;
    double prob_buy = 0.0;
-   bool consensus = false;
-   string signal = "";
    
-   // Extract prediction
-   int predPos = StringFind(response, "\"prediction\":");
-   if(predPos >= 0)
-   {
-      // Extract 2-3 characters to handle negative numbers (-1)
-      string predStr = StringSubstr(response, predPos + 13, 3);
-      prediction = (int)StringToInteger(predStr);
-   }
+   // Extract prediction (signal)
+   signal = ExtractString(response, "\"prediction\":\"", "\"");
    
-   // Extract signal
-   signal = ExtractString(response, "\"signal\":\"", "\"");
+   if(ShowDebugInfo && signal != "")
+      Print("Extracted prediction: ", signal);
    
    // Extract confidence
    int confPos = StringFind(response, "\"confidence\":");
    if(confPos >= 0)
    {
       int confEnd = StringFind(response, ",", confPos);
+      if(confEnd < 0) confEnd = StringFind(response, "}", confPos);
       string confStr = StringSubstr(response, confPos + 13, confEnd - confPos - 13);
       confidence = StringToDouble(confStr);
+      
+      if(ShowDebugInfo)
+         Print("Extracted confidence: ", confidence);
    }
    
-   // Extract consensus
-   consensus = (StringFind(response, "\"consensus\":true") >= 0);
-   
-   // Extract probabilities
-   int sellPos = StringFind(response, "\"SELL\":");
-   if(sellPos >= 0)
+   // Extract probabilities from nested object
+   int probStartPos = StringFind(response, "\"probabilities\":{");
+   if(probStartPos >= 0)
    {
-      int sellEnd = StringFind(response, ",", sellPos);
-      if(sellEnd < 0) sellEnd = StringFind(response, "}", sellPos);
-      string sellStr = StringSubstr(response, sellPos + 7, sellEnd - sellPos - 7);
-      prob_sell = StringToDouble(sellStr);
+      // Find the end of probabilities object
+      int probEndPos = StringFind(response, "}", probStartPos);
+      string probSection = StringSubstr(response, probStartPos, probEndPos - probStartPos + 1);
+      
+      // Extract SELL probability
+      int sellPos = StringFind(probSection, "\"SELL\":");
+      if(sellPos >= 0)
+      {
+         int sellEnd = StringFind(probSection, ",", sellPos);
+         if(sellEnd < 0) sellEnd = StringFind(probSection, "}", sellPos);
+         string sellStr = StringSubstr(probSection, sellPos + 7, sellEnd - sellPos - 7);
+         prob_sell = StringToDouble(sellStr);
+      }
+      
+      // Extract HOLD probability
+      int holdPos = StringFind(probSection, "\"HOLD\":");
+      if(holdPos >= 0)
+      {
+         int holdEnd = StringFind(probSection, ",", holdPos);
+         if(holdEnd < 0) holdEnd = StringFind(probSection, "}", holdPos);
+         string holdStr = StringSubstr(probSection, holdPos + 7, holdEnd - holdPos - 7);
+         prob_hold = StringToDouble(holdStr);
+      }
+      
+      // Extract BUY probability
+      int buyPos = StringFind(probSection, "\"BUY\":");
+      if(buyPos >= 0)
+      {
+         int buyEnd = StringFind(probSection, ",", buyPos);
+         if(buyEnd < 0) buyEnd = StringFind(probSection, "}", buyPos);
+         string buyStr = StringSubstr(probSection, buyPos + 6, buyEnd - buyPos - 6);
+         prob_buy = StringToDouble(buyStr);
+      }
+      
+      if(ShowDebugInfo)
+         Print("Extracted probabilities - SELL: ", prob_sell, ", HOLD: ", prob_hold, ", BUY: ", prob_buy);
    }
-   
-   int holdPos = StringFind(response, "\"HOLD\":");
-   if(holdPos >= 0)
-   {
-      int holdEnd = StringFind(response, ",", holdPos);
-      if(holdEnd < 0) holdEnd = StringFind(response, "}", holdPos);
-      string holdStr = StringSubstr(response, holdPos + 7, holdEnd - holdPos - 7);
-      prob_hold = StringToDouble(holdStr);
-   }
-   
-   int buyPos = StringFind(response, "\"BUY\":");
-   if(buyPos >= 0)
-   {
-      int buyEnd = StringFind(response, ",", buyPos);
-      if(buyEnd < 0) buyEnd = StringFind(response, "}", buyPos);
-      string buyStr = StringSubstr(response, buyPos + 6, buyEnd - buyPos - 6);
-      prob_buy = StringToDouble(buyStr);
-   }
-   
-   // Normalize probabilities to sum to 100%
-   double total = prob_sell + prob_hold + prob_buy;
-   if(total > 0)
-   {
-      prob_sell = prob_sell / total;
-      prob_hold = prob_hold / total;
-      prob_buy = prob_buy / total;
-   }
-   
-   // Extract individual model predictions
-   string modelPredictions = ExtractModelPredictions(response);
-   
-   // Extract SMC context from response
-   ExtractSMCContext(response);
-   
-   // Extract explanation
-   string explanation = ExtractString(response, "\"explanation\":\"", "\"");
-   
-   // Extract narrative
-   string narrative = ExtractString(response, "\"narrative\":\"", "\"");
-   
-   if(ShowDebugInfo)
-   {
-      if(narrative != "")
-         Print("📊 Narrative extracted: ", StringSubstr(narrative, 0, 100), "...");
-      else
-         Print("⚠️ No narrative found in response");
-   }
-   
-   // Draw OB zones on chart
-   DrawOrderBlockZones(response);
    
    // Display results
    string predLabel = signal;
-   // FIXED: Correct mapping (server sends 1=BUY, -1=SELL, 0=HOLD)
-   if(predLabel == "") predLabel = (prediction == -1 ? "SELL" : (prediction == 0 ? "HOLD" : "BUY"));
+   if(predLabel == "") predLabel = "HOLD"; // Default if parsing failed
    
    Print("========================================");
-   Print("PREDICTION: ", predLabel, (consensus ? " [MAJORITY 2/3]" : " [SPLIT VOTE]"));
-   
-   // Show if server filtered the setup
-   if(predLabel == "HOLD" && prob_hold > 0.8)
-   {
-      Print("⛔ SERVER FILTERED: Setup did not meet quality/session criteria");
-      Print("   (This is GOOD - server is being selective for 68% win rate)");
-   }
-   
+   Print("HYBRID ENSEMBLE PREDICTION: ", predLabel);
    Print("Confidence: ", DoubleToString(confidence * 100, 1), "%");
    Print("Probabilities:");
    Print("  SELL: ", DoubleToString(prob_sell * 100, 1), "%");
    Print("  HOLD: ", DoubleToString(prob_hold * 100, 1), "%");
    Print("  BUY:  ", DoubleToString(prob_buy * 100, 1), "%");
-   Print("Model Predictions: ", modelPredictions);
-   if(explanation != "")
-   {
-      Print("Explanation: ", explanation);
-   }
-   Print("SMC Context:");
-   Print("  Order Blocks: ", smcOrderBlocks);
-   Print("  Fair Value Gaps: ", smcFairValueGaps);
-   Print("  Structure: ", smcStructure);
-   Print("  Regime: ", smcRegime);
-   
-   // Extract and display indicators
-   string indicators = ExtractIndicators(response);
-   if(indicators != "")
-   {
-      Print("Indicators:");
-      Print("  ", indicators);
-   }
    Print("========================================");
    
-   // Update chart comment with color coding (includes narrative in bottom panel)
-   DisplayColoredInfo(predLabel, confidence, prob_sell, prob_hold, prob_buy, consensus, modelPredictions, explanation, narrative);
-   
-   // Narrative available in Experts log if needed
+   // Convert string signal to numeric prediction for trading logic
+   // BUY = 1, SELL = -1, HOLD = 0
+   int prediction = 0;
+   if(predLabel == "BUY") prediction = 1;
+   else if(predLabel == "SELL") prediction = -1;
+   else if(predLabel == "HOLD") prediction = 0;
    
    // Check for exit signals first (always active)
    if(EnableTrading)
@@ -1405,6 +1355,58 @@ string ExtractIndicators(string response)
    }
    
    return result;
+}
+
+//+------------------------------------------------------------------+
+//| Display simplified prediction info on chart                      |
+//+------------------------------------------------------------------+
+void DisplayPredictionInfo(string predLabel, double confidence, double prob_sell, double prob_hold, double prob_buy)
+{
+   // Determine colors based on prediction
+   color predColor = clrDodgerBlue;
+   if(predLabel == "BUY")
+      predColor = clrLime;
+   else if(predLabel == "SELL")
+      predColor = clrRed;
+   else
+      predColor = clrOrange;
+   
+   // Confidence color
+   color confColor = clrDodgerBlue;
+   if(confidence >= 0.70)
+      confColor = clrLime;
+   else if(confidence >= 0.60)
+      confColor = clrYellow;
+   else if(confidence >= 0.55)
+      confColor = clrOrange;
+   else
+      confColor = clrRed;
+   
+   // Build comment
+   string comment = "";
+   comment += "HYBRID ENSEMBLE - MACRO-TECHNICAL SENTIMENT\n";
+   comment += "═══════════════════════════════════════\n";
+   comment += "\n";
+   comment += "Timeframe: M5 (250 bars)\n";
+   comment += "Features: 58 (55 Technical + 3 Macro)\n";
+   comment += "\n";
+   comment += "PREDICTION: " + predLabel + "\n";
+   comment += "Confidence: " + DoubleToString(confidence * 100, 1) + "%\n";
+   comment += "\n";
+   comment += "───────────────────────────────────────\n";
+   comment += "Probabilities:\n";
+   comment += "  SELL: " + DoubleToString(prob_sell * 100, 1) + "%\n";
+   comment += "  HOLD: " + DoubleToString(prob_hold * 100, 1) + "%\n";
+   comment += "  BUY:  " + DoubleToString(prob_buy * 100, 1) + "%\n";
+   comment += "\n";
+   comment += "───────────────────────────────────────\n";
+   comment += "Min Confidence: " + DoubleToString(MinConfidence * 100, 0) + "%\n";
+   comment += "Trading: " + (EnableTrading ? "ENABLED" : "DEMO") + "\n";
+   comment += "Requests: " + IntegerToString(requestCount) + " | Success: " + IntegerToString(successCount) + "\n";
+   comment += "\n";
+   comment += "Server: " + RestServerURL + "\n";
+   
+   Comment(comment);
 }
 
 //+------------------------------------------------------------------+

@@ -530,7 +530,10 @@ class LSTMSequenceModel:
 
     def load_model(self, filepath: str):
         """Load model from disk"""
-        checkpoint = torch.load(filepath, map_location=self.device)
+        # PyTorch 2.6+ changed weights_only default to True
+        # Set to False to load models with sklearn objects (MinMaxScaler)
+        checkpoint = torch.load(
+            filepath, map_location=self.device, weights_only=False)
 
         # Restore config
         config = checkpoint['config']
