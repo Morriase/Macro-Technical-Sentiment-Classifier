@@ -162,16 +162,23 @@ class ForexClassifierPipeline:
                 logger.warning(
                     "⚠ No macro events found - training without macro features")
 
-            # Load historical news for sentiment analysis (REQUIRED for 67 features)
+            # Load historical news for sentiment analysis (OPTIONAL)
             logger.info("Loading historical news for sentiment analysis")
-            self.df_news = self.kaggle_news_loader.load_historical_news(
-                start_date=start_date, end_date=end_date
-            )
-            if self.df_news is not None and not self.df_news.empty:
-                logger.success(f"✓ Loaded {len(self.df_news)} news articles")
-            else:
-                raise ValueError(
-                    "Failed to load historical news - REQUIRED for 67-feature training")
+            try:
+                self.df_news = self.kaggle_news_loader.load_historical_news(
+                    start_date=start_date, end_date=end_date
+                )
+                if self.df_news is not None and not self.df_news.empty:
+                    logger.success(
+                        f"✓ Loaded {len(self.df_news)} news articles")
+                else:
+                    logger.warning(
+                        "⚠ No news data loaded - training without sentiment features")
+                    self.df_news = None
+            except Exception as e:
+                logger.warning(
+                    f"⚠ Failed to load news data: {e} - training without sentiment features")
+                self.df_news = None
 
             logger.info("✓ Data loaded successfully from Kaggle dataset")
 
@@ -242,41 +249,43 @@ class ForexClassifierPipeline:
             self.df_features["tau_post"] = 0.0
             self.df_features["weighted_surprise"] = 0.0
 
-        # Sentiment features (REQUIRED - must have 67 features total)
-        if self.sentiment_analyzer.sentiment_pipeline is None:
-            raise RuntimeError(
-                "Sentiment model failed to load - REQUIRED for 67-feature training")
+        # Sentiment features (OPTIONAL - fallback to 58 features if unavailable)
+        if (self.sentiment_analyzer.sentiment_pipeline is not None and
+                self.df_news is not None and not self.df_news.empty):
 
-        if self.df_news is None or self.df_news.empty:
-            raise ValueError(
-                "No historical news data - REQUIRED for 67-feature training")
-
-        logger.info("Calculating sentiment features...")
-        daily_sentiment = self.sentiment_analyzer.aggregate_daily_sentiment(
-            self.df_news
-        )
-        time_weighted_sentiment = self.sentiment_analyzer.calculate_time_weighted_sentiment(
-            daily_sentiment
-        )
-        # Merge sentiment features into main df_features
-        # Reset index to merge on 'date' column, then restore index
-        self.df_features = self.df_features.reset_index()
-        self.df_features = pd.merge(
-            self.df_features,
-            time_weighted_sentiment,
-            left_on="date",
-            right_on="date",
-            how="left"
-        )
-        # Fill NaN values that result from merging (e.g., days with no news)
-        sentiment_cols = [
-            col for col in time_weighted_sentiment.columns if col != "date"]
-        for col in sentiment_cols:
-            self.df_features[col] = self.df_features[col].fillna(0.0)
-        # Restore DateTimeIndex
-        self.df_features = self.df_features.set_index("date")
-        logger.success(
-            "✓ Sentiment features calculated and merged (67 features total)")
+            logger.info("Calculating sentiment features...")
+            try:
+                daily_sentiment = self.sentiment_analyzer.aggregate_daily_sentiment(
+                    self.df_news
+                )
+                time_weighted_sentiment = self.sentiment_analyzer.calculate_time_weighted_sentiment(
+                    daily_sentiment
+                )
+                # Merge sentiment features into main df_features
+                # Reset index to merge on 'date' column, then restore index
+                self.df_features = self.df_features.reset_index()
+                self.df_features = pd.merge(
+                    self.df_features,
+                    time_weighted_sentiment,
+                    left_on="date",
+                    right_on="date",
+                    how="left"
+                )
+                # Fill NaN values that result from merging (e.g., days with no news)
+                sentiment_cols = [
+                    col for col in time_weighted_sentiment.columns if col != "date"]
+                for col in sentiment_cols:
+                    self.df_features[col] = self.df_features[col].fillna(0.0)
+                # Restore DateTimeIndex
+                self.df_features = self.df_features.set_index("date")
+                logger.success(
+                    "✓ Sentiment features calculated and merged (67 features total)")
+            except Exception as e:
+                logger.warning(
+                    f"⚠ Failed to calculate sentiment features: {e} - training with 58 features")
+        else:
+            logger.warning(
+                "⚠ Sentiment unavailable - training with 58 features (55 technical + 3 macro)")
 
         # Drop NaN
         initial_len = len(self.df_features)
