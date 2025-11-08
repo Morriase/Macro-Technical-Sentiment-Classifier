@@ -130,26 +130,44 @@ class PortfolioEnsemble:
             weight = self.pair_weights.get(
                 pair, 1.0) if self.pair_weights else 1.0
 
-            # Only count if confidence exceeds threshold
-            if pred['confidence'] >= min_confidence:
-                signal = pred['signal']
+            # Extract probabilities and determine confidence
+            buy_prob = pred.get(
+                'pred_buy_prob', 0) if 'pred_buy_prob' in pred else pred.get('proba_buy', 0)
+            sell_prob = pred.get(
+                'pred_sell_prob', 0) if 'pred_sell_prob' in pred else pred.get('proba_sell', 0)
+            hold_prob = pred.get(
+                'pred_hold_prob', 0) if 'pred_hold_prob' in pred else pred.get('proba_hold', 0)
 
-                if signal == 1:  # Buy
+            # Confidence is the max probability
+            confidence = float(max(buy_prob, sell_prob, hold_prob))
+
+            # Convert signal to numeric if it's a string
+            signal_str = pred.get(
+                'signal', pred.get('predicted_class', 'HOLD'))
+            if isinstance(signal_str, str):
+                signal = {'BUY': 1, 'SELL': -1,
+                          'HOLD': 0}.get(signal_str.upper(), 0)
+            else:
+                signal = signal_str
+
+            # Only count if confidence exceeds threshold
+            if confidence >= min_confidence:
+                if signal == 1 or (isinstance(signal, str) and signal.upper() == 'BUY'):  # Buy
                     buy_votes += 1
-                    buy_confidences.append(pred['confidence'])
+                    buy_confidences.append(confidence)
                     active_pairs.append(f"{pair}:BUY")
-                elif signal == -1:  # Sell
+                elif signal == -1 or (isinstance(signal, str) and signal.upper() == 'SELL'):  # Sell
                     sell_votes += 1
-                    sell_confidences.append(pred['confidence'])
+                    sell_confidences.append(confidence)
                     active_pairs.append(f"{pair}:SELL")
                 else:  # Hold
                     hold_votes += 1
                     active_pairs.append(f"{pair}:HOLD")
 
             # Weighted probability aggregation
-            weighted_buy_prob += pred['proba_buy'] * weight
-            weighted_sell_prob += pred['proba_sell'] * weight
-            weighted_hold_prob += pred['proba_hold'] * weight
+            weighted_buy_prob += buy_prob * weight
+            weighted_sell_prob += sell_prob * weight
+            weighted_hold_prob += hold_prob * weight
             total_weight += weight
 
         # Normalize weighted probabilities
