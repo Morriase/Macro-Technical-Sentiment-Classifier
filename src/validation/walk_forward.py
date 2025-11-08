@@ -327,12 +327,12 @@ class WalkForwardOptimizer:
                 "random_state": self.splitter.min_train_samples,
             }
             model = self.model_class(xgb_params=xgb_params)
-            
+
             # Generate plot path with fold number if base path provided
             fold_plot_path = None
             if save_plots_path is not None:
                 fold_plot_path = f"{save_plots_path}_fold{fold_idx + 1}"
-            
+
             model.fit(X_train, y_train, save_plots_path=fold_plot_path)
 
             # Evaluate on OOS test set
