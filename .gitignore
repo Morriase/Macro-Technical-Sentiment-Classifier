@@ -84,3 +84,9 @@ htmlcov/
 .mypy_cache/
 .dmypy.json
 dmypy.json
+
+# Kaggle downloads (creates nested folder)
+Macro-Technical-Sentiment-Classifier/
+
+# Training progress logs
+resources/training_progress.txt
