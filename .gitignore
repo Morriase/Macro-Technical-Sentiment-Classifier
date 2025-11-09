@@ -28,6 +28,9 @@ ENV/
 
 # IDEs
 .vscode/
+
+# MQL5 Expert Advisors (local testing only)
+MQL5/
 .idea/
 *.swp
 *.swo
