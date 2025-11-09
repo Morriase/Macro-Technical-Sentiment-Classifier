@@ -53,6 +53,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY src/ ./src
 COPY models/ ./models
 COPY inference_server.py .
+COPY start.sh .
 
 # Create logs directory for the application
 RUN mkdir logs
@@ -65,5 +66,8 @@ EXPOSE 10000
 # Using gunicorn for a production-ready WSGI server
 RUN pip install gunicorn
 
-# Use shell form to properly expand PORT environment variable
-CMD ["sh", "-c", "gunicorn --workers 2 --threads 4 --timeout 120 --bind 0.0.0.0:${PORT:-10000} inference_server:app"]
+# Make startup script executable
+RUN chmod +x start.sh
+
+# Use startup script to handle PORT environment variable
+CMD ["./start.sh"]
