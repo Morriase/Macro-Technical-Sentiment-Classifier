@@ -13,10 +13,6 @@ services:
         value: production
       - key: PYTHONUNBUFFERED
         value: 1
-    plan: starter  # Free tier (can upgrade to standard/pro later)
+    plan: free  # Free tier (can upgrade to starter/standard/pro later)
     healthCheckPath: /health
     autoDeploy: true
-    numInstances: 1
-    scaling:
-      minInstances: 1
-      maxInstances: 1
