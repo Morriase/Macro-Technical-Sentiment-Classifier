@@ -51,7 +51,6 @@ data/
 *.pickle
 
 # Model weight files (allow Python source code in src/models/)
-*.pth
 *.pt
 *.h5
 *.joblib
