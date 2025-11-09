@@ -7,8 +7,6 @@ services:
     dockerfilePath: ./Dockerfile
     dockerContext: .
     envVars:
-      - key: PORT
-        value: 5000
       - key: FLASK_ENV
         value: production
       - key: PYTHONUNBUFFERED
