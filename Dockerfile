@@ -54,6 +54,9 @@ COPY src/ ./src
 COPY models/ ./models
 COPY inference_server.py .
 
+# Create logs directory for the application
+RUN mkdir logs
+
 # --- Server Configuration ---
 # Expose the port the server runs on (Render uses dynamic PORT)
 EXPOSE 5000
