@@ -8,6 +8,7 @@ Architecture:
 - Server validates features match model schema
 - Server returns predictions with confidence scores
 """
+import os
 from src.config import MODELS_DIR, CURRENCY_PAIRS, SENTIMENT_EMA_PERIODS, ENABLE_LIVE_SENTIMENT, SENTIMENT_CACHE_MINUTES
 from src.feature_engineering.technical_features import TechnicalFeatureEngineer
 from src.data_acquisition.macro_data import MacroDataAcquisition
@@ -31,9 +32,13 @@ sys.path.insert(0, str(project_root))
 
 app = Flask(__name__)
 
-# Configure logger
+# Configure logger (ensure logs directory exists)
+os.makedirs("logs", exist_ok=True)
 logger.add("logs/inference_server.log", rotation="1 day",
            retention="7 days", level="INFO")
+
+logger.info("Flask app initialized")
+logger.info(f"PORT environment variable: {os.environ.get('PORT', 'not set')}")
 
 # Pair mapping for testing (allows BTC to use EUR_USD model)
 PAIR_ALIASES = {
@@ -539,16 +544,22 @@ def model_info(pair):
 
 
 if __name__ == '__main__':
+    import os
+
     logger.info("=" * 80)
     logger.info("STARTING FOREX INFERENCE SERVER")
     logger.info("=" * 80)
     logger.info(f"Supported pairs: {', '.join(CURRENCY_PAIRS)}")
     logger.info(f"Models directory: {MODELS_DIR}")
 
+    # Get port from environment variable (for Render/Docker) or use default
+    port = int(os.environ.get('PORT', 5000))
+    logger.info(f"Server will run on port: {port}")
+
     # Run server
     app.run(
         host='0.0.0.0',  # Allow external connections
-        port=5000,
+        port=port,
         debug=False,  # Set to False in production
         threaded=True
     )
