@@ -5,8 +5,8 @@ FROM python:3.9-slim as talib_builder
 # Install build dependencies
 RUN apt-get update && \
     apt-get install -y \
-        build-essential \
-        wget && \
+    build-essential \
+    wget && \
     rm -rf /var/lib/apt/lists/*
 
 # Download and compile TA-Lib
