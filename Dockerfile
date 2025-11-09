@@ -42,7 +42,7 @@ RUN ldconfig
 
 # --- Python Dependencies ---
 # Copy requirements first to leverage Docker cache
-COPY requirements.txt .
+COPY requirements_render.txt ./requirements.txt
 
 # Install Python packages
 # We specify the TA-Lib version to ensure compatibility
