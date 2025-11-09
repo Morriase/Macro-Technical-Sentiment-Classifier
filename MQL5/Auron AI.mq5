@@ -44,10 +44,15 @@ enum    AutoCloseTime    {
                            EndOfDay = 1,     // Close at end of trading day
                            CustomTime = 2    // Close at custom time
                         }; 
-                                                
+                        
+                        
+enum SeparatorSymbol    {
+                          comma = 0,         // Comma
+                          semiColon = 1      // Semi-colon 
+                        };                                                 
 input group "/--- Input Parameters ---/"
 
-   input string            RestServerURL = "http://127.0.0.1:5000/predict";   // REST API URL
+   input string            RestServerURL =  "https://forex-inference-server.onrender.com/predict";   // REST API URL
    input long              inpMagic = 123456;                                 // EA magic number
    input IntervalTime      UpdateIntervalSeconds = 0;                         // Update interval
    input int               updateSeconds = 10;                                // Update interval in Seconds if "Every X Seconds" selected
@@ -84,13 +89,13 @@ input group "/--- Risk & Order Management Inputs ---/"
 
 input group "/--- Core functions news & trailing configuration ---/" 
 
-   input bool     NewsFilterOn = false;                                                                                                    // Enable news filtering
-   input int      StartTradingMin = 30;                                                                                                    // Minimum minutes to wait after news
-   input int      separator = 0;                                                                                                           // 0=comma,1=semicolon for news keys
-   input string   keyNews = "NFP,Non-Farm,Interest Rate,FOMC,CPI,GDP,Unemployment,Retail Sales,PMI,Central Bank,Fed,ECB,BoE,BoJ";        // Comma/semicolon separated list of news keywords
-   input string   NewsCurrencied = "USD,EUR,GBP,JPY,AUD,CAD,CHF,NZD";                                                                      // Comma-separated currencies to monitor
-   input int      DaysNewsLookup = 2;                                                                                                      // How many days ahead to look for calendar events
-   input int      StopBeforeMin = 30;                                                                                                      // Minutes before news to avoid trading
+   input bool                  NewsFilterOn = false;  // Enable news filtering
+   input int                   StartTradingMin = 30;  // Minimum minutes to wait after news
+   input SeparatorSymbol       separator = 0;        // 0=comma,1=semicolon for news keys
+   input string                keyNews = "NFP,Non-Farm,Interest Rate,FOMC,CPI,GDP,Unemployment,Retail Sales,PMI,Central Bank,Fed,ECB,BoE,BoJ";        // Comma/semicolon separated list of news keywords
+   input string                NewsCurrencies = "USD,EUR,GBP,JPY,AUD,CAD,CHF,NZD";                                                                      // Comma-separated currencies to monitor
+   input int                   DaysNewsLookup = 2;   // How many days ahead to look for calendar events
+   input int                   StopBeforeMin = 30;   // Minutes before news to avoid trading
    ushort sep_code;
 
 input group "/--- Trailing params ---/"  

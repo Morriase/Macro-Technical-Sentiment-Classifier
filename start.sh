@@ -4,16 +4,34 @@
 # Get PORT from environment or use default
 PORT=${PORT:-10000}
 
-echo "Starting Gunicorn on port $PORT"
-echo "Workers: 2, Threads: 4, Timeout: 120s"
+echo "=========================================="
+echo "Starting Forex Inference Server"
+echo "=========================================="
+echo "PORT: $PORT"
+echo "Workers: 1 (reduced for debugging)"
+echo "Threads: 2"
+echo "Timeout: 300s"
+echo "Python: $(python --version)"
+echo "Working directory: $(pwd)"
+echo "=========================================="
 
-# Start gunicorn
+# Test if app can import
+echo "Testing app import..."
+python -c "from inference_server import app; print('✓ App imported successfully')" || {
+    echo "✗ Failed to import app"
+    exit 1
+}
+
+echo "Starting Gunicorn..."
+
+# Start gunicorn with reduced workers for stability
 exec gunicorn \
-    --workers 2 \
-    --threads 4 \
-    --timeout 120 \
+    --workers 1 \
+    --threads 2 \
+    --timeout 300 \
     --bind 0.0.0.0:$PORT \
     --access-logfile - \
     --error-logfile - \
-    --log-level info \
+    --log-level debug \
+    --preload \
     inference_server:app
