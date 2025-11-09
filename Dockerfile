@@ -59,11 +59,11 @@ RUN mkdir logs
 
 # --- Server Configuration ---
 # Expose the port the server runs on (Render uses dynamic PORT)
-EXPOSE 5000
+EXPOSE 10000
 
 # Set the command to run the application
 # Using gunicorn for a production-ready WSGI server
 RUN pip install gunicorn
 
-# Use PORT environment variable (Render requirement)
-CMD gunicorn --workers 2 --threads 4 --timeout 120 --bind 0.0.0.0:${PORT:-5000} inference_server:app
+# Use shell form to properly expand PORT environment variable
+CMD ["sh", "-c", "gunicorn --workers 2 --threads 4 --timeout 120 --bind 0.0.0.0:${PORT:-10000} inference_server:app"]
