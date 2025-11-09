@@ -215,8 +215,6 @@ string GetCalendarEventsJSON(string pair)
    
    // Parse keywords for high-impact events
    string sep = (separator == 0) ? "," : ";";
-   ushort sep_code = StringGetCharacter(sep, 0);
-   string newsToAvoid[];
    int k = StringSplit(keyNews, sep_code, newsToAvoid);
    
    for(int i = 0; i < ArraySize(values); i++)

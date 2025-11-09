@@ -1,0 +1,35 @@
+# Git
+.git
+.gitignore
+
+# Docker
+Dockerfile
+.dockerignore
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+.env.example
+venv/
+.venv/
+
+# IDE
+.idea/
+.vscode/
+
+# Local data and logs (but keep models/)
+data/
+logs/
+results/
+*.log
+*.csv
+
+# Documentation
+*.md
+!README.md
+
+# Keep models directory
+!models/

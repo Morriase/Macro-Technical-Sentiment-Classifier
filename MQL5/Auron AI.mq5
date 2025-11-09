@@ -603,6 +603,9 @@ void ParseAndExecute(string response)
    Print("  BUY:  ", DoubleToString(prob_buy * 100, 1), "%");
    Print("========================================");
    
+   // Display on chart with color coding
+   DisplayPredictionInfo(predLabel, confidence, prob_sell, prob_hold, prob_buy);
+   
    // Convert string signal to numeric prediction for trading logic
    // BUY = 1, SELL = -1, HOLD = 0
    int prediction = 0;
@@ -1371,55 +1374,234 @@ string ExtractIndicators(string response)
 }
 
 //+------------------------------------------------------------------+
-//| Display simplified prediction info on chart                      |
+//| Display prediction info on chart with color-coded indicators     |
+//+------------------------------------------------------------------+
+//| Color Scheme:                                                    |
+//|   🟢 BUY      = Bright Green (High confidence bullish signal)   |
+//|   🔴 SELL     = Bright Crimson (High confidence bearish signal) |
+//|   🟠 HOLD     = Orange (Neutral/no clear direction)             |
+//|   🔵 SKIP     = Blue (Below minimum confidence threshold)       |
 //+------------------------------------------------------------------+
 void DisplayPredictionInfo(string predLabel, double confidence, double prob_sell, double prob_hold, double prob_buy)
 {
-   // Determine colors based on prediction
+   // Color scheme implementation
+   // BUY = Bright Green (clrLime)
+   // SELL = Bright Crimson (clrCrimson) 
+   // HOLD = Orange (clrOrange)
+   // Below Confidence = Blue (clrDodgerBlue)
+   
    color predColor = clrDodgerBlue;
-   if(predLabel == "BUY")
-      predColor = clrLime;
-   else if(predLabel == "SELL")
-      predColor = clrRed;
+   if(confidence >= MinConfidence)
+   {
+      if(predLabel == "BUY")
+         predColor = clrLime;           // Bright Green
+      else if(predLabel == "SELL")
+         predColor = clrCrimson;         // Bright Crimson
+      else
+         predColor = clrOrange;          // Orange (HOLD)
+   }
    else
-      predColor = clrOrange;
+   {
+      predColor = clrDodgerBlue;         // Blue (below confidence)
+   }
    
    // Confidence color
    color confColor = clrDodgerBlue;
-   if(confidence >= 0.70)
-      confColor = clrLime;
-   else if(confidence >= 0.60)
-      confColor = clrYellow;
-   else if(confidence >= 0.55)
-      confColor = clrOrange;
+   if(confidence >= MinConfidence)
+   {
+      if(confidence >= 0.80)
+         confColor = clrLime;            // Very high confidence
+      else if(confidence >= 0.70)
+         confColor = clrYellow;          // High confidence
+      else
+         confColor = clrOrange;          // Medium confidence
+   }
    else
-      confColor = clrRed;
+   {
+      confColor = clrDodgerBlue;         // Below minimum
+   }
    
-   // Build comment
+   // Build comment with color indicators
    string comment = "";
-   comment += "HYBRID ENSEMBLE - MACRO-TECHNICAL SENTIMENT\n";
-   comment += "═══════════════════════════════════════\n";
+   comment += "╔════════════════════════════════════════╗\n";
+   comment += "║  HYBRID ENSEMBLE - MACRO-TECHNICAL     ║\n";
+   comment += "║         LSTM + XGBoost Model           ║\n";
+   comment += "╚════════════════════════════════════════╝\n";
    comment += "\n";
-   comment += "Timeframe: M5 (250 bars)\n";
-   comment += "Features: 58 (55 Technical + 3 Macro)\n";
+   
+   // System info
+   comment += "📊 Analysis: Single Timeframe (M5)\n";
+   comment += "📈 Candles: 250 bars for feature engineering\n";
+   comment += "🔧 Features: 58 (55 Technical + 3 Macro)\n";
+   comment += "🌐 Server: " + RestServerURL + "\n";
    comment += "\n";
-   comment += "PREDICTION: " + predLabel + "\n";
-   comment += "Confidence: " + DoubleToString(confidence * 100, 1) + "%\n";
+   comment += "💡 Note: No regime/multi-timeframe analysis\n";
    comment += "\n";
-   comment += "───────────────────────────────────────\n";
-   comment += "Probabilities:\n";
-   comment += "  SELL: " + DoubleToString(prob_sell * 100, 1) + "%\n";
-   comment += "  HOLD: " + DoubleToString(prob_hold * 100, 1) + "%\n";
-   comment += "  BUY:  " + DoubleToString(prob_buy * 100, 1) + "%\n";
+   
+   // Update mode
+   string updateMode = "";
+   if(UpdateIntervalSeconds == 0)
+      updateMode = "New M5 Bar Only";
+   else
+      updateMode = "Every " + IntegerToString(updateSeconds) + " seconds";
+   comment += "⏱️ Update: " + updateMode + "\n";
    comment += "\n";
-   comment += "───────────────────────────────────────\n";
-   comment += "Min Confidence: " + DoubleToString(MinConfidence * 100, 0) + "%\n";
-   comment += "Trading: " + (EnableTrading ? "ENABLED" : "DEMO") + "\n";
-   comment += "Requests: " + IntegerToString(requestCount) + " | Success: " + IntegerToString(successCount) + "\n";
+   
+   comment += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n";
+   
+   // Prediction with visual indicator and color coding
+   string predIcon = "";
+   string predStatus = "";
+   
+   if(confidence >= MinConfidence)
+   {
+      if(predLabel == "BUY")
+      {
+         predIcon = "🟢 ▲";              // Bright Green
+         predStatus = " [STRONG BUY]";
+      }
+      else if(predLabel == "SELL")
+      {
+         predIcon = "🔴 ▼";              // Bright Crimson
+         predStatus = " [STRONG SELL]";
+      }
+      else
+      {
+         predIcon = "🟠 ●";              // Orange
+         predStatus = " [NEUTRAL]";
+      }
+   }
+   else
+   {
+      predIcon = "🔵 ○";                 // Blue (below confidence)
+      predStatus = " [LOW CONFIDENCE]";
+   }
+   
+   comment += "PREDICTION: " + predIcon + " " + predLabel + predStatus + "\n";
+   
+   // Confidence with bar
+   string confBar = "";
+   int confBars = (int)MathRound(confidence * 20);
+   for(int i = 0; i < 20; i++)
+   {
+      if(i < confBars)
+         confBar += "█";
+      else
+         confBar += "░";
+   }
+   comment += "Confidence: " + DoubleToString(confidence * 100, 1) + "% [" + confBar + "]\n";
    comment += "\n";
-   comment += "Server: " + RestServerURL + "\n";
+   
+   comment += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n";
+   comment += "PROBABILITIES:\n";
+   comment += "\n";
+   
+   // SELL probability with bar
+   string sellBar = "";
+   int sellBars = (int)MathRound(prob_sell * 20);
+   for(int i = 0; i < 20; i++)
+      sellBar += (i < sellBars) ? "█" : "░";
+   comment += "🔴 SELL:  " + StringFormat("%5.1f%%", prob_sell * 100) + " [" + sellBar + "]\n";
+   
+   // HOLD probability with bar
+   string holdBar = "";
+   int holdBars = (int)MathRound(prob_hold * 20);
+   for(int i = 0; i < 20; i++)
+      holdBar += (i < holdBars) ? "█" : "░";
+   comment += "🟠 HOLD:  " + StringFormat("%5.1f%%", prob_hold * 100) + " [" + holdBar + "]\n";
+   
+   // BUY probability with bar
+   string buyBar = "";
+   int buyBars = (int)MathRound(prob_buy * 20);
+   for(int i = 0; i < 20; i++)
+      buyBar += (i < buyBars) ? "█" : "░";
+   comment += "🟢 BUY:   " + StringFormat("%5.1f%%", prob_buy * 100) + " [" + buyBar + "]\n";
+   comment += "\n";
+   
+   comment += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n";
+   comment += "STATUS:\n";
+   comment += "\n";
+   
+   // Trading status with color indicators
+   if(EnableTrading)
+   {
+      if(confidence >= MinConfidence)
+      {
+         if(predLabel == "BUY")
+            comment += "✅ 🟢 READY TO BUY\n";
+         else if(predLabel == "SELL")
+            comment += "✅ 🔴 READY TO SELL\n";
+         else
+            comment += "✅ 🟠 HOLD POSITION\n";
+      }
+      else
+      {
+         comment += "🔵 CONFIDENCE TOO LOW - NO TRADE\n";
+      }
+      comment += "🎯 Trading: ENABLED\n";
+   }
+   else
+   {
+      comment += "📊 Trading: DEMO MODE\n";
+      if(confidence >= MinConfidence)
+      {
+         if(predLabel == "BUY")
+            comment += "   Would signal: 🟢 BUY\n";
+         else if(predLabel == "SELL")
+            comment += "   Would signal: 🔴 SELL\n";
+         else
+            comment += "   Would signal: 🟠 HOLD\n";
+      }
+      else
+      {
+         comment += "   Would signal: 🔵 SKIP (Low Confidence)\n";
+      }
+   }
+   
+   comment += "📈 Min Confidence: " + DoubleToString(MinConfidence * 100, 0) + "%\n";
+   comment += "\n";
+   
+   // News filter status
+   if(NewsFilterOn)
+   {
+      comment += "📰 News Filter: " + (newsStatus != "" ? newsStatus : "Active") + "\n";
+   }
+   
+   // Statistics
+   double successRate = (requestCount > 0) ? (double)successCount / requestCount * 100.0 : 0.0;
+   comment += "📊 Requests: " + IntegerToString(requestCount) + " | Success: " + IntegerToString(successCount);
+   if(requestCount > 0)
+      comment += " (" + DoubleToString(successRate, 1) + "%)";
+   comment += "\n";
+   
+   // Recovery status
+   if(EnableCompensatory && consecutiveLosses > 0)
+   {
+      comment += "⚠️ Recovery Mode: " + IntegerToString(consecutiveLosses) + " losses\n";
+   }
+   
+   comment += "\n";
+   comment += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n";
+   
+   // Time info
+   comment += "🕐 Last Update: " + TimeToString(TimeCurrent(), TIME_DATE|TIME_MINUTES) + "\n";
    
    Comment(comment);
+   
+   // Set chart background color based on signal strength
+   if(confidence >= MinConfidence)
+   {
+      if(predLabel == "BUY")
+         ChartSetInteger(0, CHART_COLOR_BACKGROUND, clrBlack);
+      else if(predLabel == "SELL")
+         ChartSetInteger(0, CHART_COLOR_BACKGROUND, clrBlack);
+      else
+         ChartSetInteger(0, CHART_COLOR_BACKGROUND, clrBlack);
+   }
+   else
+   {
+      ChartSetInteger(0, CHART_COLOR_BACKGROUND, clrBlack);
+   }
 }
 
 //+------------------------------------------------------------------+
