@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: forex-inference-server
+    runtime: docker
+    repo: https://github.com/Morriase/Macro-Technical-Sentiment-Classifier
+    branch: main
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    envVars:
+      - key: PORT
+        value: 5000
+      - key: FLASK_ENV
+        value: production
+      - key: PYTHONUNBUFFERED
+        value: 1
+    plan: starter  # Free tier (can upgrade to standard/pro later)
+    healthCheckPath: /health
+    autoDeploy: true
+    numInstances: 1
+    scaling:
+      minInstances: 1
+      maxInstances: 1

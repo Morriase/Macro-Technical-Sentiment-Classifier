@@ -35,6 +35,13 @@ app = Flask(__name__)
 logger.add("logs/inference_server.log", rotation="1 day",
            retention="7 days", level="INFO")
 
+# Pair mapping for testing (allows BTC to use EUR_USD model)
+PAIR_ALIASES = {
+    'BTCUSD': 'EUR_USD',
+    'BTC_USD': 'EUR_USD',
+    'XBTUSD': 'EUR_USD',  # BitMEX notation
+}
+
 # Global model cache
 MODELS = {}
 FEATURE_SCHEMAS = {}
@@ -285,11 +292,17 @@ def predict():
         if not pair or not ohlcv_data:
             return jsonify({'error': 'Missing required fields: pair, ohlcv'}), 400
 
+        # Resolve pair alias (e.g., BTCUSD → EUR_USD for testing)
+        original_pair = pair
+        if pair in PAIR_ALIASES:
+            pair = PAIR_ALIASES[pair]
+            logger.info(f"Mapping {original_pair} → {pair} (using alias)")
+
         if pair not in CURRENCY_PAIRS:
-            return jsonify({'error': f'Unsupported pair: {pair}'}), 400
+            return jsonify({'error': f'Unsupported pair: {original_pair}'}), 400
 
         logger.info(
-            f"Prediction request for {pair} with {len(ohlcv_data)} candles, {len(events_data)} events")
+            f"Prediction request for {original_pair} ({pair}) with {len(ohlcv_data)} candles, {len(events_data)} events")
 
         # Convert OHLCV to DataFrame
         df_ohlcv = pd.DataFrame(ohlcv_data)
@@ -418,7 +431,8 @@ def predict():
 
         # Prepare response
         response = {
-            'pair': pair,
+            'pair': original_pair,  # Return original pair name (e.g., BTCUSD)
+            'model_pair': pair,  # Show which model was used (e.g., EUR_USD)
             'prediction': signal,
             'confidence': round(confidence, 4),
             'probabilities': {
@@ -433,7 +447,8 @@ def predict():
             'status': 'success'
         }
 
-        logger.success(f"{pair}: {signal} (confidence: {confidence:.2%})")
+        logger.success(
+            f"{original_pair} ({pair} model): {signal} (confidence: {confidence:.2%})")
         return jsonify(response)
 
     except FileNotFoundError as e:

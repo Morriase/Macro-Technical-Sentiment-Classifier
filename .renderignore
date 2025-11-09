@@ -1,0 +1,63 @@
+# Render-specific ignore (similar to .dockerignore)
+# Reduces build context size
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+
+# Environments
+.env
+.env.example
+venv/
+.venv/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Local data (don't upload to Render)
+data/
+logs/
+results/
+*.log
+*.csv
+
+# Documentation (don't need in Docker image)
+*.md
+!README.md
+
+# Test files
+test_*.py
+tests/
+
+# MQL5 files (not needed on server)
+MQL5/
+
+# Resources
+resources/
+
+# Kaggle-specific
+prepare_kaggle_data.py
+download_mt5_data.py
+download_macro_events.py
+requirements_kaggle.txt
+KAGGLE_*.md
+
+# Keep these important files:
+# - models/ (needed!)
+# - src/ (needed!)
+# - inference_server.py (needed!)
+# - requirements.txt (needed!)
+# - Dockerfile (needed!)
