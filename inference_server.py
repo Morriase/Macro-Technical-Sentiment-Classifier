@@ -37,8 +37,13 @@ os.makedirs("logs", exist_ok=True)
 logger.add("logs/inference_server.log", rotation="1 day",
            retention="7 days", level="INFO")
 
-logger.info("Flask app initialized")
+logger.info("=" * 80)
+logger.info("INITIALIZING FOREX INFERENCE SERVER")
+logger.info("=" * 80)
+logger.info(f"Flask app created")
 logger.info(f"PORT environment variable: {os.environ.get('PORT', 'not set')}")
+logger.info(f"Models directory: {MODELS_DIR}")
+logger.info(f"Supported pairs: {CURRENCY_PAIRS}")
 
 # Pair mapping for testing (allows BTC to use EUR_USD model)
 PAIR_ALIASES = {
@@ -50,16 +55,45 @@ PAIR_ALIASES = {
 # Global model cache
 MODELS = {}
 FEATURE_SCHEMAS = {}
-TECH_ENGINEER = TechnicalFeatureEngineer()
-MACRO_ENGINEER = MacroDataAcquisition()  # For macro feature engineering
+
+# Initialize feature engineers
+try:
+    logger.info("Initializing TechnicalFeatureEngineer...")
+    TECH_ENGINEER = TechnicalFeatureEngineer()
+    logger.info("✓ TechnicalFeatureEngineer initialized")
+except Exception as e:
+    logger.error(f"✗ Failed to initialize TechnicalFeatureEngineer: {e}")
+    raise
+
+try:
+    logger.info("Initializing MacroDataAcquisition...")
+    MACRO_ENGINEER = MacroDataAcquisition()
+    logger.info("✓ MacroDataAcquisition initialized")
+except Exception as e:
+    logger.error(f"✗ Failed to initialize MacroDataAcquisition: {e}")
+    raise
 
 # Only load sentiment components if live sentiment is enabled
 if ENABLE_LIVE_SENTIMENT:
-    NEWS_ACQUIRER = NewsDataAcquisition()  # For live news acquisition
-    SENTIMENT_ANALYZER = SentimentAnalyzer()  # For live sentiment analysis
+    try:
+        logger.info("Initializing NewsDataAcquisition...")
+        NEWS_ACQUIRER = NewsDataAcquisition()
+        logger.info("✓ NewsDataAcquisition initialized")
+
+        logger.info("Initializing SentimentAnalyzer...")
+        SENTIMENT_ANALYZER = SentimentAnalyzer()
+        logger.info("✓ SentimentAnalyzer initialized")
+    except Exception as e:
+        logger.error(f"✗ Failed to initialize sentiment components: {e}")
+        raise
 else:
     NEWS_ACQUIRER = None
     SENTIMENT_ANALYZER = None
+    logger.info("Sentiment analysis disabled")
+
+logger.info("=" * 80)
+logger.info("SERVER INITIALIZATION COMPLETE")
+logger.info("=" * 80)
 
 
 def load_model_and_schema(pair: str):

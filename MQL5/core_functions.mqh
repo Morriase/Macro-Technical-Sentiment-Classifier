@@ -98,7 +98,7 @@ bool IsUpcomingNews(){
        MqlCalendarCountry country; 
        CalendarCountryById(event.country_id, country); 
        
-       if(StringFind(NewsCurrencied, country.currency) < 0) continue; 
+       if(StringFind(NewsCurrencies, country.currency) < 0) continue; 
        
          for (int j = 0; j<k; j++){
             string currentevent = newsToAvoid[j]; 
@@ -213,7 +213,6 @@ string GetCalendarEventsJSON(string pair)
    string jsonEvents = "[";
    int eventCount = 0;
    
-   // Parse keywords for high-impact events
    string sep = (separator == 0) ? "," : ";";
    int k = StringSplit(keyNews, sep_code, newsToAvoid);
    
