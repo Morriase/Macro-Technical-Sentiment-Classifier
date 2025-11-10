@@ -110,7 +110,15 @@ class ForexClassifierPipeline:
 
         # Initialize feature engineers (common to both modes)
         self.tech_engineer = TechnicalFeatureEngineer()
-        self.sentiment_analyzer = SentimentAnalyzer()
+
+        # Sentiment analyzer is optional - if it fails to load, we continue without it
+        try:
+            self.sentiment_analyzer = SentimentAnalyzer()
+            logger.success("✓ Sentiment features enabled")
+        except Exception as e:
+            self.sentiment_analyzer = None
+            logger.warning(f"⚠ Sentiment features disabled: {e}")
+            logger.warning("Proceeding with technical + MTF features only")
 
         # Initialize data storage
         self.df_price = None
@@ -137,46 +145,56 @@ class ForexClassifierPipeline:
         symbol = self.currency_pair.replace("_", "")
 
         if self.use_kaggle_data:
-            logger.info(f"Loading data for {self.currency_pair} from Kaggle dataset")
-            
+            logger.info(
+                f"Loading data for {self.currency_pair} from Kaggle dataset")
+
             # Load primary timeframe data (M5)
-            self.df_price = self.kaggle_loader.load_symbol_data(symbol, timeframe="M5")
+            self.df_price = self.kaggle_loader.load_symbol_data(
+                symbol, timeframe="M5")
             logger.info(f"Loaded {len(self.df_price):,} M5 candles")
 
             # Load higher timeframe data for MTF features
             self.higher_timeframes = {}
             for tf in ["H1", "H4"]:
                 try:
-                    df_ht = self.kaggle_loader.load_symbol_data(symbol, timeframe=tf)
+                    df_ht = self.kaggle_loader.load_symbol_data(
+                        symbol, timeframe=tf)
                     self.higher_timeframes[tf] = df_ht
                     logger.info(f"Loaded {len(df_ht):,} {tf} candles")
                 except FileNotFoundError:
-                    logger.warning(f"Could not find {tf} data for {symbol}. Skipping MTF features for this timeframe.")
-            
+                    logger.warning(
+                        f"Could not find {tf} data for {symbol}. Skipping MTF features for this timeframe.")
+
             # Load other data sources
             self.df_events = self.kaggle_loader.load_macro_events(symbol)
             if self.df_events is not None and not self.df_events.empty:
                 logger.success(f"✓ Loaded {len(self.df_events)} macro events")
-            
+
             try:
-                self.df_news = self.kaggle_news_loader.load_historical_news(start_date=start_date, end_date=end_date)
+                self.df_news = self.kaggle_news_loader.load_historical_news(
+                    start_date=start_date, end_date=end_date)
                 if self.df_news is not None and not self.df_news.empty:
-                    logger.success(f"✓ Loaded {len(self.df_news)} news articles")
+                    logger.success(
+                        f"✓ Loaded {len(self.df_news)} news articles")
             except Exception as e:
                 logger.warning(f"⚠ Failed to load news data: {e}")
                 self.df_news = None
 
         else:
             # Local data fetching from OANDA (assuming H4 is the primary analysis timeframe)
-            logger.info(f"Fetching FX data for {self.currency_pair} from OANDA")
-            self.df_price = self.fx_data.fetch_oanda_candles(instrument=self.currency_pair, granularity="H4", start_date=start_date, end_date=end_date)
-            
+            logger.info(
+                f"Fetching FX data for {self.currency_pair} from OANDA")
+            self.df_price = self.fx_data.fetch_oanda_candles(
+                instrument=self.currency_pair, granularity="H4", start_date=start_date, end_date=end_date)
+
             # For local execution, we might need to implement fetching H1 as well if needed
-            self.higher_timeframes = {} 
-            logger.warning("Local MTF fetching not fully implemented. Using primary timeframe only.")
+            self.higher_timeframes = {}
+            logger.warning(
+                "Local MTF fetching not fully implemented. Using primary timeframe only.")
 
             # Fetch other data sources
-            self.df_events = self.macro_data.get_events_for_currency_pair(pair=self.currency_pair, start_date=start_date, end_date=end_date)
+            self.df_events = self.macro_data.get_events_for_currency_pair(
+                pair=self.currency_pair, start_date=start_date, end_date=end_date)
 
         logger.info(f"Fetched {len(self.df_price)} primary price bars")
 
@@ -192,10 +210,14 @@ class ForexClassifierPipeline:
             raise ValueError("Price data not loaded. Run fetch_data() first.")
 
         # --- Step 2.1: Base Technical Features on Primary Timeframe ---
-        logger.info("Calculating base technical features on primary timeframe...")
-        self.df_features = self.tech_engineer.calculate_all_features(self.df_price.copy())
-        self.df_features = self.tech_engineer.calculate_feature_crosses(self.df_features)
-        logger.success(f"✓ Calculated {len(self.df_features.columns)} base features.")
+        logger.info(
+            "Calculating base technical features on primary timeframe...")
+        self.df_features = self.tech_engineer.calculate_all_features(
+            self.df_price.copy())
+        self.df_features = self.tech_engineer.calculate_feature_crosses(
+            self.df_features)
+        logger.success(
+            f"✓ Calculated {len(self.df_features.columns)} base features.")
 
         # --- Step 2.2: Multi-Timeframe and Regime Features ---
         if hasattr(self, 'higher_timeframes') and self.higher_timeframes:
@@ -204,7 +226,8 @@ class ForexClassifierPipeline:
                 higher_timeframes=self.higher_timeframes
             )
         else:
-            logger.warning("No higher timeframe data available. Skipping MTF feature engineering.")
+            logger.warning(
+                "No higher timeframe data available. Skipping MTF feature engineering.")
 
         # --- Step 2.3: Macro Features ---
         if self.df_events is not None and not self.df_events.empty and self.macro_data:
@@ -219,13 +242,16 @@ class ForexClassifierPipeline:
             self.df_features["weighted_surprise"] = 0.0
 
         # --- Step 2.4: Sentiment Features ---
-        if (self.sentiment_analyzer.sentiment_pipeline is not None and
+        if (self.sentiment_analyzer is not None and
+                self.sentiment_analyzer.sentiment_pipeline is not None and
                 self.df_news is not None and not self.df_news.empty):
             logger.info("Calculating sentiment features...")
             try:
-                daily_sentiment = self.sentiment_analyzer.aggregate_daily_sentiment(self.df_news)
-                time_weighted_sentiment = self.sentiment_analyzer.calculate_time_weighted_sentiment(daily_sentiment)
-                
+                daily_sentiment = self.sentiment_analyzer.aggregate_daily_sentiment(
+                    self.df_news)
+                time_weighted_sentiment = self.sentiment_analyzer.calculate_time_weighted_sentiment(
+                    daily_sentiment)
+
                 self.df_features = self.df_features.reset_index()
                 self.df_features = pd.merge(
                     self.df_features,
@@ -234,19 +260,23 @@ class ForexClassifierPipeline:
                     right_on="date",
                     how="left"
                 )
-                sentiment_cols = [col for col in time_weighted_sentiment.columns if col != "date"]
+                sentiment_cols = [
+                    col for col in time_weighted_sentiment.columns if col != "date"]
                 for col in sentiment_cols:
                     self.df_features[col] = self.df_features[col].fillna(0.0)
                 self.df_features = self.df_features.set_index("date")
                 logger.success("✓ Sentiment features calculated and merged.")
             except Exception as e:
-                logger.warning(f"⚠ Failed to calculate sentiment features: {e}")
-        
+                logger.warning(
+                    f"⚠ Failed to calculate sentiment features: {e}")
+
         # --- Final Cleanup ---
         initial_len = len(self.df_features)
         self.df_features.dropna(inplace=True)
-        logger.info(f"Dropped {initial_len - len(self.df_features)} rows with NaNs after feature engineering.")
-        logger.info(f"✓ {len(self.df_features.columns)} total features created, {len(self.df_features)} samples ready.")
+        logger.info(
+            f"Dropped {initial_len - len(self.df_features)} rows with NaNs after feature engineering.")
+        logger.info(
+            f"✓ {len(self.df_features.columns)} total features created, {len(self.df_features)} samples ready.")
 
     def create_target(
         self,
