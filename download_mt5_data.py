@@ -1,6 +1,6 @@
 """
 Simple MT5 Data Download Script
-Downloads FX data locally, saves to data folder
+Downloads FX data locally for multiple timeframes, saves to data folder
 You upload to Kaggle later
 """
 from loguru import logger
@@ -10,18 +10,27 @@ import pytz
 from src.data_acquisition.mt5_data import MT5DataAcquisition
 import sys
 from pathlib import Path
+
+# Add project root to allow imports from src
 project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 
+from src.config import CURRENCY_PAIRS
 
-# Major pairs + Gold
-SYMBOLS = ["EURUSD", "GBPUSD", "USDJPY", "USDCHF",
-           "AUDUSD", "USDCAD", "NZDUSD", "XAUUSD"]
 
-# Number of bars to fetch (80,000 M5 bars = ~392 days / 13 months of 24/5 FX data)
-# This is the maximum available from most MT5 brokers
-# 80k bars at M5 = plenty of data for LSTM training
-NUM_BARS = 80000
+# Timeframes to download
+TIMEFRAMES = ["M5", "H1", "H4"]
+
+# Number of bars to fetch for each timeframe
+# Adjust to get roughly the same amount of historical data
+# M5: 80k bars ~ 13 months
+# H1: 80k/12 ~ 6.7k bars
+# H4: 80k/48 ~ 1.7k bars
+BARS_PER_TIMEFRAME = {
+    "M5": 80000,
+    "H1": 7000,
+    "H4": 2000 
+}
 
 # Output folder
 OUTPUT_DIR = Path("data/kaggle_dataset/fx_data")
@@ -34,28 +43,32 @@ if not mt5.is_connected:
     logger.error("MT5 not connected! Make sure MT5 terminal is running.")
     exit(1)
 
-logger.info(f"Downloading data for {len(SYMBOLS)} symbols...")
-logger.info(f"Fetching last {NUM_BARS} M5 bars per symbol")
+# Convert "EUR_USD" to "EURUSD" format for MT5
+symbols_mt5 = [pair.replace("_", "") for pair in CURRENCY_PAIRS]
 
-for symbol in SYMBOLS:
-    logger.info(f"Downloading {symbol}...")
+logger.info(f"Downloading data for {len(symbols_mt5)} symbols across {len(TIMEFRAMES)} timeframes...")
 
-    df = mt5.fetch_historical_data(
-        symbol=symbol,
-        timeframe="M5",
-        count=NUM_BARS
-    )
+for symbol in symbols_mt5:
+    for timeframe in TIMEFRAMES:
+        num_bars = BARS_PER_TIMEFRAME[timeframe]
+        logger.info(f"Downloading {symbol} - {timeframe} ({num_bars} bars)...")
 
-    if df.empty:
-        logger.warning(f"No data for {symbol}")
-        continue
+        df = mt5.fetch_historical_data(
+            symbol=symbol,
+            timeframe=timeframe,
+            count=num_bars
+        )
 
-    # Save to parquet
-    filename = OUTPUT_DIR / f"{symbol}_M5.parquet"
-    df.to_parquet(filename, compression="gzip")
+        if df.empty:
+            logger.warning(f"No data for {symbol} on {timeframe}")
+            continue
 
-    size_mb = filename.stat().st_size / (1024 * 1024)
-    logger.success(f"✓ {symbol}: {len(df):,} candles saved ({size_mb:.1f} MB)")
+        # Save to parquet
+        filename = OUTPUT_DIR / f"{symbol}_{timeframe}.parquet"
+        df.to_parquet(filename, compression="gzip")
+
+        size_mb = filename.stat().st_size / (1024 * 1024)
+        logger.success(f"✓ {symbol} ({timeframe}): {len(df):,} candles saved ({size_mb:.1f} MB)")
 
 mt5.close()
 

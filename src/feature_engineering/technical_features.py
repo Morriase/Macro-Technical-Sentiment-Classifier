@@ -68,9 +68,12 @@ class TechnicalFeatureEngineer:
             # Calculate normalized distance from EMA
             # Normalized by ATR to make it scale-invariant
             atr_col = f"atr_{self.config['ATR_PERIOD']}"
-            if atr_col in df.columns:
-                df[f"ema_{period}_dist_norm"] = (
-                    df["close"] - df[col_name]) / df[atr_col]
+            # Ensure ATR is calculated before using it for normalization
+            if atr_col not in df.columns:
+                df[atr_col] = talib.ATR(df["high"], df["low"], df["close"], timeperiod=self.config['ATR_PERIOD'])
+            
+            df[f"ema_{period}_dist_norm"] = (
+                df["close"] - df[col_name]) / df[atr_col]
 
         # EMA crossover signals
         if len(ema_periods) >= 2:
@@ -84,6 +87,12 @@ class TechnicalFeatureEngineer:
                 df["ema_50_200_cross"] = np.where(
                     df["ema_50"] > df["ema_200"], 1, -1
                 )
+                # New feature: Price vs. EMA(200) - long-term trend filter
+                df["price_vs_ema_200_dist_norm"] = (df["close"] - df["ema_200"]) / df[atr_col]
+                
+                # New feature: EMA(200) slope
+                df["ema_200_slope"] = df["ema_200"].diff()
+
 
         return df
 
@@ -185,6 +194,12 @@ class TechnicalFeatureEngineer:
         # Commodity Channel Index
         df["cci"] = talib.CCI(df["high"], df["low"],
                               df["close"], timeperiod=14)
+        
+        # New Feature: Strong uptrend/downtrend based on ADX and DIs
+        # ADX > 25 (configurable threshold) indicates a strong trend
+        adx_threshold = 25 
+        df["strong_uptrend_adx"] = ((df["adx"] > adx_threshold) & (df["plus_di"] > df["minus_di"])).astype(int)
+        df["strong_downtrend_adx"] = ((df["adx"] > adx_threshold) & (df["minus_di"] > df["plus_di"])).astype(int)
 
         return df
 
@@ -223,6 +238,80 @@ class TechnicalFeatureEngineer:
             df[f"realized_vol_{window}_ann"] = df[f"realized_vol_{window}"] * \
                 np.sqrt(252)
 
+        return df
+
+    def add_multi_timeframe_features(
+        self, 
+        df_primary: pd.DataFrame, 
+        higher_timeframes: Dict[str, pd.DataFrame]
+    ) -> pd.DataFrame:
+        """
+        Adds multi-timeframe (MTF) features and regime classification to the primary dataframe.
+
+        Args:
+            df_primary: The main dataframe (e.g., M5 or H4) to add features to.
+            higher_timeframes: A dictionary mapping timeframe names (e.g., "H1", "H4")
+                               to their corresponding OHLCV dataframes.
+
+        Returns:
+            The primary dataframe with MTF features merged in.
+        """
+        logger.info("Adding multi-timeframe features and regime classification...")
+        df_merged = df_primary.copy()
+
+        for tf, df_ht in higher_timeframes.items():
+            logger.info(f"Calculating features for {tf} timeframe...")
+            
+            # Calculate indicators on the higher timeframe data
+            df_ht_feats = pd.DataFrame(index=df_ht.index)
+            df_ht_feats[f'ema_50_{tf}'] = talib.EMA(df_ht['close'], timeperiod=50)
+            df_ht_feats[f'ema_200_{tf}'] = talib.EMA(df_ht['close'], timeperiod=200)
+            df_ht_feats[f'rsi_{tf}'] = talib.RSI(df_ht['close'], timeperiod=14)
+            df_ht_feats[f'adx_{tf}'] = talib.ADX(df_ht['high'], df_ht['low'], df_ht['close'], timeperiod=14)
+            
+            # Calculate regime features for the higher timeframe
+            df_ht_feats = self._calculate_regime_features(df_ht_feats, tf)
+
+            # Ensure the index is a datetime index for merging
+            if not isinstance(df_merged.index, pd.DatetimeIndex):
+                df_merged.index = pd.to_datetime(df_merged.index)
+            if not isinstance(df_ht_feats.index, pd.DatetimeIndex):
+                df_ht_feats.index = pd.to_datetime(df_ht_feats.index)
+
+            # Merge the higher timeframe features into the primary dataframe
+            df_merged = pd.merge_asof(
+                left=df_merged.sort_index(),
+                right=df_ht_feats.sort_index(),
+                left_index=True,
+                right_index=True,
+                direction='backward'
+            )
+            logger.success(f"✓ Merged {tf} features.")
+
+        return df_merged
+
+    def _calculate_regime_features(self, df: pd.DataFrame, timeframe: str) -> pd.DataFrame:
+        """
+        Calculates market regime features based on indicators.
+
+        Args:
+            df: Dataframe containing indicators for a specific timeframe.
+            timeframe: The timeframe string (e.g., "H4") to be used in column names.
+
+        Returns:
+            Dataframe with added regime features.
+        """
+        # Regime: Trending or Ranging
+        adx_col = f'adx_{timeframe}'
+        df[f'regime_trending_{timeframe}'] = (df[adx_col] > 25).astype(int)
+        df[f'regime_ranging_{timeframe}'] = (df[adx_col] <= 25).astype(int)
+
+        # Regime: Bullish or Bearish Trend
+        ema_50_col = f'ema_50_{timeframe}'
+        ema_200_col = f'ema_200_{timeframe}'
+        df[f'regime_bullish_{timeframe}'] = (df[ema_50_col] > df[ema_200_col]).astype(int)
+        df[f'regime_bearish_{timeframe}'] = (df[ema_50_col] < df[ema_200_col]).astype(int)
+        
         return df
 
     def calculate_feature_crosses(self, df: pd.DataFrame) -> pd.DataFrame:
