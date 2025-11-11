@@ -112,9 +112,9 @@ ENSEMBLE_CONFIG = {
         },
         "lstm": {
             "sequence_length": 22,  # ~1 month of trading days
-            "hidden_size": 128,
+            "hidden_size": 96,  # Reduced from 128 to prevent overfitting
             "num_layers": 2,
-            "dropout": 0.3,
+            "dropout": 0.4,  # Increased from 0.3 for stronger regularization
             "learning_rate": 0.001,
             "batch_size": 64,
             "epochs": 100,

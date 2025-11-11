@@ -280,9 +280,10 @@ class LSTMSequenceModel:
         self.train_accs = []
         self.val_accs = []
 
-        # Loss and optimizer
+        # Loss and optimizer (with L2 regularization via weight_decay)
         criterion = nn.CrossEntropyLoss()
-        optimizer = optim.Adam(self.model.parameters(), lr=self.learning_rate)
+        optimizer = optim.Adam(self.model.parameters(),
+                               lr=self.learning_rate, weight_decay=1e-4)
 
         # Training loop
         best_val_loss = float('inf')
