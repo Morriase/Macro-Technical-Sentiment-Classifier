@@ -138,6 +138,17 @@ class PortfolioEnsemble:
             hold_prob = pred.get(
                 'pred_hold_prob', 0) if 'pred_hold_prob' in pred else pred.get('proba_hold', 0)
 
+            # Convert to float (in case they're strings)
+            try:
+                buy_prob = float(buy_prob) if buy_prob not in [
+                    None, '', 'HOLD', 'BUY', 'SELL'] else 0.0
+                sell_prob = float(sell_prob) if sell_prob not in [
+                    None, '', 'HOLD', 'BUY', 'SELL'] else 0.0
+                hold_prob = float(hold_prob) if hold_prob not in [
+                    None, '', 'HOLD', 'BUY', 'SELL'] else 0.0
+            except (ValueError, TypeError):
+                buy_prob, sell_prob, hold_prob = 0.0, 0.0, 1.0  # Default to HOLD
+
             # Confidence is the max probability
             confidence = float(max(buy_prob, sell_prob, hold_prob))
 

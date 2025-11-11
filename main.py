@@ -379,11 +379,16 @@ class ForexClassifierPipeline:
                 model_class=HybridEnsemble,
             )
 
+            # Create plots directory
+            plots_path = MODELS_DIR / "logs" / f"{self.currency_pair}_training"
+            plots_path.parent.mkdir(parents=True, exist_ok=True)
+
             results = optimizer.run_walk_forward_optimization(
                 df=self.df_features,
                 feature_columns=feature_cols,
                 target_column="target_class",
                 optimize_each_window=optimize_hyperparams,
+                save_plots_path=str(plots_path),
             )
 
             # Use the most recent model
