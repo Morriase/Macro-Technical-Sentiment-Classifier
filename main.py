@@ -281,7 +281,7 @@ class ForexClassifierPipeline:
     def create_target(
         self,
         forward_window_hours: int = 24,
-        min_move_pips: float = 10.0,
+        min_move_pips: float = 5.0,  # Lowered from 10.0 to reduce HOLD bias
     ):
         """
         Step 3: Create target variable

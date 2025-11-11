@@ -153,11 +153,19 @@ class HybridEnsemble:
             y_train_fold = y[train_idx]
             X_val_fold = X[val_idx]
 
+            # Compute sample weights for this fold
+            from sklearn.utils.class_weight import compute_sample_weight
+            fold_sample_weights = compute_sample_weight(
+                class_weight={0: 3.0, 1: 3.0, 2: 1.0},  # BUY=0, SELL=1, HOLD=2
+                y=y_train_fold
+            )
+
             # XGBoost base learner
             xgb_fold = xgb.XGBClassifier(**self.xgb_params)
             xgb_fold.fit(
                 X_train_fold,
                 y_train_fold,
+                sample_weight=fold_sample_weights,
                 eval_set=[(X_val_fold, y[val_idx])],
                 verbose=False,
             )
@@ -232,17 +240,25 @@ class HybridEnsemble:
         )
 
         # Step 2: Train base learners on full training set
+        # Compute sample weights to combat class imbalance
+        from sklearn.utils.class_weight import compute_sample_weight
+        sample_weights = compute_sample_weight(
+            class_weight={0: 3.0, 1: 3.0, 2: 1.0},  # BUY=0, SELL=1, HOLD=2
+            y=y
+        )
+
         logger.info("Training XGBoost base learner on full dataset")
         if X_val is not None and y_val is not None:
             X_val_scaled = self.scaler.transform(X_val)
             self.xgb_base.fit(
                 X_scaled,
                 y,
+                sample_weight=sample_weights,
                 eval_set=[(X_val_scaled, y_val)],
                 verbose=True,
             )
         else:
-            self.xgb_base.fit(X_scaled, y)
+            self.xgb_base.fit(X_scaled, y, sample_weight=sample_weights)
 
         logger.info("Training LSTM base learner on full dataset")
         self.lstm_base = LSTMSequenceModel(
