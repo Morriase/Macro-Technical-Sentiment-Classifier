@@ -228,7 +228,8 @@ if USE_CUDA:
 IMBALANCE_CONFIG = {
     "strategy": "SMOTE",  # or "class_weights", "threshold_adjustment"
     "smote_k_neighbors": 5,
-    "cost_sensitive_weights": {"Buy": 2.0, "Sell": 2.0, "Hold": 1.0},
+    # Increased from 2.0 to reduce HOLD bias
+    "cost_sensitive_weights": {"Buy": 3.0, "Sell": 3.0, "Hold": 1.0},
     "target_threshold_atr": 1.0,  # Min ATR move to classify as Buy/Sell
 }
 
@@ -237,5 +238,5 @@ TARGET_CONFIG = {
     # "ternary" (Buy/Sell/Hold) or "binary" (Up/Down)
     "classification_type": "ternary",
     "forward_window_hours": 24,
-    "min_move_threshold_pips": 10,  # Minimum move to classify as directional
+    "min_move_threshold_pips": 5,  # Lowered from 10 to get more directional signals
 }
