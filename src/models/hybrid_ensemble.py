@@ -65,6 +65,8 @@ class HybridEnsemble:
             "scale_pos_weight": 1.0,
             "eval_metric": "mlogloss",
             "random_state": random_state,
+            "tree_method": "gpu_hist",  # Use GPU for training (10-100x faster!)
+            "device": "cuda",  # Explicitly use CUDA
             "n_jobs": -1,
         }
 
@@ -98,6 +100,8 @@ class HybridEnsemble:
             "reg_lambda": 1.0,
             "eval_metric": "mlogloss",
             "random_state": random_state,
+            "tree_method": "gpu_hist",  # Use GPU for training
+            "device": "cuda",  # Explicitly use CUDA
             "n_jobs": -1,
         }
 
