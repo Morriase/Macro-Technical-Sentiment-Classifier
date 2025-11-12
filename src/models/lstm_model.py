@@ -391,7 +391,9 @@ class LSTMSequenceModel:
 
                 total_loss += loss.item() * self.gradient_accumulation_steps
 
-            avg_loss = total_loss / (len(indices) / self.batch_size)
+            # Calculate average loss (number of batches)
+            num_batches = len(train_loader)
+            avg_loss = total_loss / num_batches
 
             # Compute training accuracy on a sample (to avoid OOM on large datasets)
             # Use last batch for efficiency
