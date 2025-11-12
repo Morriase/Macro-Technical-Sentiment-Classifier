@@ -403,8 +403,9 @@ class LSTMSequenceModel:
                 sample_size = min(1000, len(X_train_tensor))
                 sample_indices = torch.randperm(
                     len(X_train_tensor))[:sample_size]
-                X_sample = X_train_tensor[sample_indices]
-                y_sample = y_train_tensor[sample_indices]
+                # Move sample to GPU
+                X_sample = X_train_tensor[sample_indices].to(self.device)
+                y_sample = y_train_tensor[sample_indices].to(self.device)
 
                 train_logits = self.model(X_sample)
                 train_preds = torch.argmax(train_logits, dim=1)
