@@ -112,13 +112,13 @@ ENSEMBLE_CONFIG = {
         },
         "lstm": {
             "sequence_length": 22,  # ~1 month of trading days
-            "hidden_size": 64,  # Reduced from 128 to prevent overfitting (50% reduction)
+            "hidden_size": 96,  # Sweet spot: not too big (128), not too small (64)
             "num_layers": 2,
-            "dropout": 0.5,  # Increased from 0.3 for stronger regularization
-            "learning_rate": 0.0003,  # Reduced from 0.001 for slower, more stable learning
+            "dropout": 0.4,  # Balanced regularization (was 0.5, too aggressive)
+            "learning_rate": 0.0005,  # Slightly faster than 0.0003, slower than 0.001
             "batch_size": 128,  # Increased from 64 for more stable gradients
             "epochs": 100,
-            "early_stopping_patience": 5,  # Reduced from 10 to stop overfitting sooner
+            "early_stopping_patience": 7,  # Give it a bit more time (was 5, too aggressive)
         },
     },
     "meta_learner": {
