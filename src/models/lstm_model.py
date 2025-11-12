@@ -290,7 +290,7 @@ class LSTMSequenceModel:
         self.train_accs = []
         self.val_accs = []
 
-        # Loss and optimizer with L1 + L2 regularization
+        # Loss and optimizer with L2 regularization
         criterion = nn.CrossEntropyLoss(label_smoothing=0.1)  # Add label smoothing
         
         # Use instance regularization parameters
@@ -304,7 +304,7 @@ class LSTMSequenceModel:
             self.model.parameters(),
             lr=self.learning_rate,
             betas=(beta1, beta2),  # Momentum parameters
-            weight_decay=l2_lambda  # L2 regularization
+            weight_decay=l2_lambda  # L2 regularization (reduced from 2e-3 to 1e-3)
         )
         
         # Learning rate scheduler - reduce LR when validation loss plateaus
