@@ -239,5 +239,6 @@ TARGET_CONFIG = {
     # "ternary" (Buy/Sell/Hold) or "binary" (Up/Down)
     "classification_type": "ternary",
     "forward_window_hours": 24,
-    "min_move_threshold_pips": 5,  # Lowered from 10 to get more directional signals
+    "min_move_threshold_pips": None,  # None = use ATR-based threshold (adaptive)
+    "atr_multiplier": 0.5,  # 0.5x ATR = significant move (balances classes better)
 }
