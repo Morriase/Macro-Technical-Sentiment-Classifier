@@ -290,20 +290,10 @@ class LSTMSequenceModel:
         self.train_accs = []
         self.val_accs = []
 
-        # Calculate class weights to handle imbalance (23% Buy, 23% Sell, 53% Hold)
-        from sklearn.utils.class_weight import compute_class_weight
-        class_weights = compute_class_weight(
-            'balanced', 
-            classes=np.unique(y_seq), 
-            y=y_seq
-        )
-        class_weights_tensor = torch.FloatTensor(class_weights).to(self.device)
-
         # Loss and optimizer with L2 regularization
-        criterion = nn.CrossEntropyLoss(
-            weight=class_weights_tensor,  # Balance classes
-            label_smoothing=0.1  # Prevent overconfidence
-        )
+        # Note: class weights were too aggressive (dropped val_acc to 23%)
+        # Label smoothing alone is sufficient for this imbalance (23/23/53%)
+        criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
         
         # Use instance regularization parameters
         l1_lambda = self.l1_lambda
