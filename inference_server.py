@@ -129,31 +129,7 @@ def load_model_and_schema(pair: str):
     return model, schema
 
 
-def resample_to_higher_timeframe(df_m5: pd.DataFrame, timeframe: str) -> pd.DataFrame:
-    """
-    Resample M5 data to higher timeframe (H1 or H4)
-    
-    Args:
-        df_m5: M5 OHLCV DataFrame with datetime index
-        timeframe: 'H1' or 'H4'
-    
-    Returns:
-        Resampled DataFrame
-    """
-    resample_rule = {'H1': '1H', 'H4': '4H'}[timeframe]
-    
-    df_resampled = df_m5.resample(resample_rule).agg({
-        'open': 'first',
-        'high': 'max',
-        'low': 'min',
-        'close': 'last',
-        'volume': 'sum'
-    }).dropna()
-    
-    return df_resampled
-
-
-def engineer_features_from_ohlcv(df_ohlcv: pd.DataFrame, pair: str) -> tuple:
+def engineer_features_from_ohlcv(df_m5: pd.DataFrame, df_h1: pd.DataFrame, df_h4: pd.DataFrame, pair: str) -> tuple:
     """
     Engineer features from OHLCV data using EXACT training pipeline
     
@@ -163,24 +139,26 @@ def engineer_features_from_ohlcv(df_ohlcv: pd.DataFrame, pair: str) -> tuple:
     - 3 macro features (tau_pre, tau_post, weighted_surprise)
     - 0 sentiment features (not trained)
 
+    Args:
+        df_m5: M5 OHLCV DataFrame
+        df_h1: H1 OHLCV DataFrame
+        df_h4: H4 OHLCV DataFrame
+        pair: Currency pair
+
     Returns:
-        feature_array: numpy array of features
-        feature_names: list of feature names in order
+        df_features: DataFrame with all features
+        feature_cols: List of feature column names
     """
     logger.info(
-        f"Engineering features for {pair} from {len(df_ohlcv)} candles")
+        f"Engineering features for {pair} from M5={len(df_m5)}, H1={len(df_h1)}, H4={len(df_h4)} candles")
 
     # Step 1: Base technical features on M5 (67 features)
-    df_features = TECH_ENGINEER.calculate_all_features(df_ohlcv.copy())
+    df_features = TECH_ENGINEER.calculate_all_features(df_m5.copy())
     df_features = TECH_ENGINEER.calculate_feature_crosses(df_features)
     logger.info(f"✓ Calculated {len(df_features.columns)} base technical features")
 
-    # Step 2: Multi-timeframe features (14 features) - CRITICAL FIX!
-    # Resample M5 to H1 and H4 to match training pipeline
+    # Step 2: Multi-timeframe features (14 features) using REAL H1/H4 data
     try:
-        df_h1 = resample_to_higher_timeframe(df_ohlcv, 'H1')
-        df_h4 = resample_to_higher_timeframe(df_ohlcv, 'H4')
-        
         higher_timeframes = {
             'H1': df_h1,
             'H4': df_h4
@@ -190,7 +168,7 @@ def engineer_features_from_ohlcv(df_ohlcv: pd.DataFrame, pair: str) -> tuple:
             df_primary=df_features,
             higher_timeframes=higher_timeframes
         )
-        logger.info(f"✓ Added multi-timeframe features (H1 + H4)")
+        logger.info(f"✓ Added multi-timeframe features from real H1 + H4 data")
     except Exception as e:
         logger.error(f"Failed to add MTF features: {e}")
         raise ValueError(f"MTF feature engineering failed: {e}")
@@ -341,9 +319,17 @@ def predict():
     Expected JSON format:
     {
         "pair": "EUR_USD",
-        "ohlcv": [
+        "ohlcv_m5": [  // M5 candles (250+)
             {"timestamp": "2025-01-01 00:00:00", "open": 1.1000, "high": 1.1010, "low": 1.0990, "close": 1.1005, "volume": 1000},
-            ...  // Need 250+ M5 candles for feature engineering
+            ...
+        ],
+        "ohlcv_h1": [  // H1 candles (250+)
+            {"timestamp": "2025-01-01 00:00:00", "open": 1.1000, "high": 1.1010, "low": 1.0990, "close": 1.1005, "volume": 1000},
+            ...
+        ],
+        "ohlcv_h4": [  // H4 candles (250+)
+            {"timestamp": "2025-01-01 00:00:00", "open": 1.1000, "high": 1.1010, "low": 1.0990, "close": 1.1005, "volume": 1000},
+            ...
         ],
         "events": [  // OPTIONAL: Raw calendar events for macro features
             {
@@ -377,11 +363,13 @@ def predict():
             return jsonify({'error': 'No JSON data provided'}), 400
 
         pair = data.get('pair')
-        ohlcv_data = data.get('ohlcv')
+        ohlcv_m5_data = data.get('ohlcv_m5')
+        ohlcv_h1_data = data.get('ohlcv_h1')
+        ohlcv_h4_data = data.get('ohlcv_h4')
         events_data = data.get('events', [])  # Optional calendar events
 
-        if not pair or not ohlcv_data:
-            return jsonify({'error': 'Missing required fields: pair, ohlcv'}), 400
+        if not pair or not ohlcv_m5_data or not ohlcv_h1_data or not ohlcv_h4_data:
+            return jsonify({'error': 'Missing required fields: pair, ohlcv_m5, ohlcv_h1, ohlcv_h4'}), 400
 
         # Resolve pair alias (e.g., BTCUSD → EUR_USD for testing)
         original_pair = pair
@@ -393,32 +381,41 @@ def predict():
             return jsonify({'error': f'Unsupported pair: {original_pair}'}), 400
 
         logger.info(
-            f"Prediction request for {original_pair} ({pair}) with {len(ohlcv_data)} candles, {len(events_data)} events")
+            f"Prediction request for {original_pair} ({pair}) with M5={len(ohlcv_m5_data)}, H1={len(ohlcv_h1_data)}, H4={len(ohlcv_h4_data)} candles, {len(events_data)} events")
 
-        # Convert OHLCV to DataFrame
-        df_ohlcv = pd.DataFrame(ohlcv_data)
-        df_ohlcv['timestamp'] = pd.to_datetime(df_ohlcv['timestamp'])
-        df_ohlcv.set_index('timestamp', inplace=True)
+        # Convert OHLCV to DataFrames
+        df_m5 = pd.DataFrame(ohlcv_m5_data)
+        df_m5['timestamp'] = pd.to_datetime(df_m5['timestamp'])
+        df_m5.set_index('timestamp', inplace=True)
+        
+        df_h1 = pd.DataFrame(ohlcv_h1_data)
+        df_h1['timestamp'] = pd.to_datetime(df_h1['timestamp'])
+        df_h1.set_index('timestamp', inplace=True)
+        
+        df_h4 = pd.DataFrame(ohlcv_h4_data)
+        df_h4['timestamp'] = pd.to_datetime(df_h4['timestamp'])
+        df_h4.set_index('timestamp', inplace=True)
 
-        # Validate OHLCV data
+        # Validate OHLCV data for all timeframes
         required_cols = ['open', 'high', 'low', 'close', 'volume']
-        missing_cols = [
-            col for col in required_cols if col not in df_ohlcv.columns]
-        if missing_cols:
-            return jsonify({'error': f'Missing OHLCV columns: {missing_cols}'}), 400
-
-        # Check minimum data
-        if len(df_ohlcv) < 250:  # Need enough for longest indicators
-            return jsonify({
-                'error': f'Insufficient data: need at least 250 candles, got {len(df_ohlcv)}'
-            }), 400
+        
+        for tf_name, df_tf in [('M5', df_m5), ('H1', df_h1), ('H4', df_h4)]:
+            missing_cols = [col for col in required_cols if col not in df_tf.columns]
+            if missing_cols:
+                return jsonify({'error': f'Missing {tf_name} OHLCV columns: {missing_cols}'}), 400
+            
+            # Check minimum data
+            if len(df_tf) < 250:
+                return jsonify({
+                    'error': f'Insufficient {tf_name} data: need at least 250 candles, got {len(df_tf)}'
+                }), 400
 
         # Load model and schema
         model, schema = load_model_and_schema(pair)
 
-        # Engineer technical features (55 features)
+        # Engineer features using real M5, H1, and H4 data (81 features total)
         df_features, feature_names = engineer_features_from_ohlcv(
-            df_ohlcv, pair)
+            df_m5, df_h1, df_h4, pair)
 
         # Engineer macro features (3 features: tau_pre, tau_post, weighted_surprise)
         df_features = engineer_macro_features(events_data, df_features)
@@ -517,9 +514,11 @@ def predict():
             'quality_filtered': quality_filtered,
             'should_trade': quality_scorer.should_trade(quality_score),
             # Metadata
-            'timestamp': df_ohlcv.index[-1].isoformat(),
+            'timestamp': df_m5.index[-1].isoformat(),
             'feature_count': len(feature_names),
-            'candles_processed': len(df_ohlcv),
+            'candles_m5': len(df_m5),
+            'candles_h1': len(df_h1),
+            'candles_h4': len(df_h4),
             'candles_used': len(feature_array),
             'status': 'success'
         }
