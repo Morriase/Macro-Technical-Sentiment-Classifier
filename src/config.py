@@ -112,16 +112,16 @@ ENSEMBLE_CONFIG = {
         },
         "lstm": {
             "sequence_length": 22,  # ~1 month of trading days
-            "hidden_size": 80,  # Reduced from 96 to reduce overfitting further
+            "hidden_size": 96,  # Sweet spot between 80 (underfitting) and 128 (overfitting)
             "num_layers": 2,
-            "dropout": 0.5,  # Increased from 0.4 for stronger regularization
+            "dropout": 0.4,  # Balanced: not too weak (0.3) or too strong (0.5)
             "learning_rate": 0.0005,  # Slightly faster than 0.0003, slower than 0.001
             "batch_size": 128,  # Increased from 64 for more stable gradients
             "epochs": 100,
             "early_stopping_patience": 7,  # Give it a bit more time (was 5, too aggressive)
             # Regularization (L2 only for now - simpler and effective)
             "l1_lambda": 0.0,  # L1 disabled (can enable later for feature selection)
-            "l2_lambda": 2e-3,  # L2 regularization (Ridge) via weight_decay
+            "l2_lambda": 1e-3,  # Reduced from 2e-3 (was too strong)
             # Optimizer momentum (Adam parameters)
             "beta1": 0.9,  # Momentum coefficient (default 0.9)
             "beta2": 0.999,  # RMSprop coefficient (default 0.999)
@@ -249,5 +249,5 @@ TARGET_CONFIG = {
     "classification_type": "ternary",
     "forward_window_hours": 24,
     "min_move_threshold_pips": None,  # None = use ATR-based threshold (adaptive)
-    "atr_multiplier": 0.75,  # Increased from 0.5 to 0.75 for clearer directional signals
+    "atr_multiplier": 0.6,  # Sweet spot: 0.5 (too easy) < 0.6 < 0.75 (too hard)
 }
