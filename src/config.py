@@ -115,10 +115,10 @@ ENSEMBLE_CONFIG = {
             "hidden_size": 64,  # Balanced: not too small (48) or too large (96 overfits)
             "num_layers": 2,
             "dropout": 0.55,  # Strong regularization (between 0.5-0.6)
-            "learning_rate": 0.0003,  # Balanced: not too slow (0.0002) or fast (0.0005)
-            "batch_size": 128,  # Increased from 64 for more stable gradients
+            "learning_rate": 0.00025,  # Reduced from 0.0003 for smoother convergence
+            "batch_size": 256,  # Increased from 128 for more stable gradients (less spiking)
             "epochs": 100,
-            "early_stopping_patience": 6,  # Balanced: not too aggressive (5) or lenient (7)
+            "early_stopping_patience": 8,  # Increased from 6 (cosine annealing needs more time)
             # Regularization (L2 only for now - simpler and effective)
             "l1_lambda": 0.0,  # L1 disabled (can enable later for feature selection)
             "l2_lambda": 1.5e-3,  # Balanced: between 1e-3 and 2e-3

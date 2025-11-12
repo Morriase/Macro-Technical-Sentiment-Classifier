@@ -307,9 +307,12 @@ class LSTMSequenceModel:
             weight_decay=l2_lambda  # L2 regularization (reduced from 2e-3 to 1e-3)
         )
         
-        # Learning rate scheduler - reduce LR when validation loss plateaus
-        scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, mode='min', factor=0.5, patience=3, verbose=False
+        # Learning rate scheduler - cosine annealing for smoother convergence
+        # Reduces LR gradually from initial to min_lr over T_max epochs
+        scheduler = optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, 
+            T_max=self.epochs,  # Full training duration
+            eta_min=self.learning_rate * 0.01  # Min LR = 1% of initial
         )
 
         # Training loop
@@ -410,8 +413,8 @@ class LSTMSequenceModel:
                 self.val_losses.append(val_loss)
                 self.val_accs.append(val_acc)
                 
-                # Step the learning rate scheduler
-                scheduler.step(val_loss)
+                # Step the learning rate scheduler (CosineAnnealing steps every epoch)
+                scheduler.step()
 
                 # Only log every 10 epochs or at early stopping
                 if (epoch + 1) % 10 == 0:
