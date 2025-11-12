@@ -112,13 +112,19 @@ ENSEMBLE_CONFIG = {
         },
         "lstm": {
             "sequence_length": 22,  # ~1 month of trading days
-            "hidden_size": 96,  # Sweet spot: not too big (128), not too small (64)
+            "hidden_size": 80,  # Reduced from 96 to reduce overfitting further
             "num_layers": 2,
-            "dropout": 0.4,  # Balanced regularization (was 0.5, too aggressive)
+            "dropout": 0.5,  # Increased from 0.4 for stronger regularization
             "learning_rate": 0.0005,  # Slightly faster than 0.0003, slower than 0.001
             "batch_size": 128,  # Increased from 64 for more stable gradients
             "epochs": 100,
             "early_stopping_patience": 7,  # Give it a bit more time (was 5, too aggressive)
+            # Regularization (L2 only for now - simpler and effective)
+            "l1_lambda": 0.0,  # L1 disabled (can enable later for feature selection)
+            "l2_lambda": 2e-3,  # L2 regularization (Ridge) via weight_decay
+            # Optimizer momentum (Adam parameters)
+            "beta1": 0.9,  # Momentum coefficient (default 0.9)
+            "beta2": 0.999,  # RMSprop coefficient (default 0.999)
         },
     },
     "meta_learner": {
@@ -163,6 +169,9 @@ RISK_MANAGEMENT = {
     "max_time_bars": 6,  # Maximum 24 hours (6 x 4H bars)
     "max_position_size": 0.02,  # 2% of capital per trade
     "max_drawdown_threshold": 0.15,  # 15% max drawdown alert
+    # Fuzzy Logic Quality Scoring
+    "use_fuzzy_quality": True,  # Enable fuzzy logic signal quality filtering
+    "min_quality_threshold": 40,  # Minimum quality score to trade (0-100)
 }
 
 # Trade Entry Optimization Ranges (for WFO)
@@ -240,5 +249,5 @@ TARGET_CONFIG = {
     "classification_type": "ternary",
     "forward_window_hours": 24,
     "min_move_threshold_pips": None,  # None = use ATR-based threshold (adaptive)
-    "atr_multiplier": 0.5,  # 0.5x ATR = significant move (balances classes better)
+    "atr_multiplier": 0.75,  # Increased from 0.5 to 0.75 for clearer directional signals
 }
