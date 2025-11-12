@@ -270,19 +270,31 @@ class LSTMSequenceModel:
         X_seq, y_seq = self.prepare_sequences(X_scaled, y)
         # logger.info(f"Prepared {len(X_seq)} training sequences")
 
-        # Convert to tensors
-        X_train_tensor = torch.FloatTensor(X_seq).to(self.device)
-        y_train_tensor = torch.LongTensor(y_seq).to(self.device)
+        # Convert to tensors (keep on CPU initially for DataLoader)
+        X_train_tensor = torch.FloatTensor(X_seq)
+        y_train_tensor = torch.LongTensor(y_seq)
 
-        # Validation data
+        # Validation data (keep on CPU initially)
         if X_val is not None and y_val is not None:
             X_val_scaled = self.scaler.transform(X_val)
             X_val_seq, y_val_seq = self.prepare_sequences(X_val_scaled, y_val)
-            X_val_tensor = torch.FloatTensor(X_val_seq).to(self.device)
-            y_val_tensor = torch.LongTensor(y_val_seq).to(self.device)
+            X_val_tensor = torch.FloatTensor(X_val_seq)
+            y_val_tensor = torch.LongTensor(y_val_seq)
         else:
             X_val_tensor = None
             y_val_tensor = None
+        
+        # Create DataLoader for efficient batching and parallel data loading
+        from torch.utils.data import TensorDataset, DataLoader
+        train_dataset = TensorDataset(X_train_tensor, y_train_tensor)
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=self.batch_size,
+            shuffle=True,
+            num_workers=2,  # Parallel data loading (reduce CPU bottleneck)
+            pin_memory=True,  # Faster GPU transfer
+            persistent_workers=True  # Keep workers alive between epochs
+        )
 
         # Initialize histories for diagnostics
         self.train_losses = []
@@ -325,15 +337,13 @@ class LSTMSequenceModel:
         for epoch in range(self.epochs):
             self.model.train()
             total_loss = 0
-
-            # Mini-batch training with gradient accumulation
-            indices = torch.randperm(len(X_train_tensor))
             optimizer.zero_grad()
 
-            for batch_idx, i in enumerate(range(0, len(indices), self.batch_size)):
-                batch_indices = indices[i:i + self.batch_size]
-                X_batch = X_train_tensor[batch_indices]
-                y_batch = y_train_tensor[batch_indices]
+            # Mini-batch training with DataLoader (parallel data loading)
+            for batch_idx, (X_batch, y_batch) in enumerate(train_loader):
+                # Move batch to GPU
+                X_batch = X_batch.to(self.device, non_blocking=True)
+                y_batch = y_batch.to(self.device, non_blocking=True)
 
                 # Forward pass with mixed precision
                 if self.use_amp:
@@ -406,10 +416,14 @@ class LSTMSequenceModel:
             if X_val_tensor is not None:
                 self.model.eval()
                 with torch.no_grad():
-                    val_outputs = self.model(X_val_tensor)
-                    val_loss = criterion(val_outputs, y_val_tensor).item()
+                    # Move validation data to GPU
+                    X_val_gpu = X_val_tensor.to(self.device)
+                    y_val_gpu = y_val_tensor.to(self.device)
+                    
+                    val_outputs = self.model(X_val_gpu)
+                    val_loss = criterion(val_outputs, y_val_gpu).item()
                     val_preds = torch.argmax(val_outputs, dim=1)
-                    val_acc = (val_preds == y_val_tensor).float().mean().item()
+                    val_acc = (val_preds == y_val_gpu).float().mean().item()
 
                 # Record validation metrics
                 self.val_losses.append(val_loss)
