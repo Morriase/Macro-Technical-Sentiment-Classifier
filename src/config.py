@@ -112,16 +112,16 @@ ENSEMBLE_CONFIG = {
         },
         "lstm": {
             "sequence_length": 22,  # ~1 month of trading days
-            "hidden_size": 64,  # Balanced: not too small (48) or too large (96 overfits)
+            "hidden_size": 72,  # Slightly increased from 64 for better capacity (some folds underfit)
             "num_layers": 2,
-            "dropout": 0.55,  # Strong regularization (between 0.5-0.6)
+            "dropout": 0.5,  # Reduced from 0.55 (was too aggressive, causing inconsistency)
             "learning_rate": 0.00025,  # Reduced from 0.0003 for smoother convergence
             "batch_size": 256,  # Increased from 128 for more stable gradients (less spiking)
             "epochs": 100,
-            "early_stopping_patience": 8,  # Increased from 6 (cosine annealing needs more time)
+            "early_stopping_patience": 10,  # Increased from 8 for more consistent convergence
             # Regularization (L2 only for now - simpler and effective)
             "l1_lambda": 0.0,  # L1 disabled (can enable later for feature selection)
-            "l2_lambda": 1.5e-3,  # Balanced: between 1e-3 and 2e-3
+            "l2_lambda": 1.2e-3,  # Reduced from 1.5e-3 (slightly less aggressive)
             # Optimizer momentum (Adam parameters)
             "beta1": 0.9,  # Momentum coefficient (default 0.9)
             "beta2": 0.999,  # RMSprop coefficient (default 0.999)
