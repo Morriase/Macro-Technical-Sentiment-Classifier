@@ -248,6 +248,6 @@ TARGET_CONFIG = {
     # "ternary" (Buy/Sell/Hold) or "binary" (Up/Down)
     "classification_type": "ternary",
     "forward_window_hours": 24,
-    "min_move_threshold_pips": None,  # None = use ATR-based threshold (adaptive)
-    "atr_multiplier": 0.6,  # Sweet spot: 0.5 (too easy) < 0.6 < 0.75 (too hard)
+    "min_move_threshold_pips": 4.0,  # Fixed 4 pips (was None=ATR-based, caused 68% signals)
+    "atr_multiplier": 0.6,  # Only used if min_move_threshold_pips is None
 }
