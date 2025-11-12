@@ -42,24 +42,24 @@ class KaggleNewsLoader:
         """
         Downloads and unzips the Kaggle dataset if it doesn't already exist.
         On Kaggle, the dataset is attached as an input, so no download is needed.
+        Returns False if dataset is not available (optional feature).
         """
         # On Kaggle, dataset is already attached - just verify it exists
         if IS_KAGGLE:
             if self.news_filepath.exists():
                 logger.info("Using attached Kaggle news dataset.")
-                return
+                return True
             else:
-                logger.error(f"News dataset not found at {self.news_filepath}")
-                logger.error(
-                    "Make sure 'massive-stock-news-analysis-db-for-nlpbacktests' is attached as input!")
-                raise FileNotFoundError(
-                    f"News dataset not found at {self.news_filepath}")
+                logger.warning(f"News dataset not found at {self.news_filepath}")
+                logger.warning(
+                    "News sentiment features will be disabled. To enable, attach 'massive-stock-news-analysis-db-for-nlpbacktests' as input.")
+                return False
 
         # Local environment: download if needed
         if self.news_filepath.exists():
             logger.info(
                 "Kaggle news dataset already downloaded and extracted.")
-            return
+            return True
 
         logger.info(
             f"Downloading dataset '{self.dataset_name}' to '{self.download_dir}'...")
@@ -79,13 +79,14 @@ class KaggleNewsLoader:
             os.remove(path)
 
             logger.success("Dataset downloaded and extracted successfully.")
+            return True
 
         except Exception as e:
-            logger.error(f"Failed to download or extract Kaggle dataset: {e}")
-            logger.error(
-                "Please ensure you have set up your Kaggle API credentials.")
-            logger.error("See: https://www.kaggle.com/docs/api")
-            raise
+            logger.warning(f"Failed to download or extract Kaggle dataset: {e}")
+            logger.warning(
+                "News sentiment features will be disabled. To enable, set up Kaggle API credentials.")
+            logger.warning("See: https://www.kaggle.com/docs/api")
+            return False
 
     def load_historical_news(self, start_date: datetime = None, end_date: datetime = None) -> pd.DataFrame:
         """
@@ -97,16 +98,17 @@ class KaggleNewsLoader:
 
         Returns:
             A pandas DataFrame containing historical news articles,
-            with 'date' and 'text' columns.
+            with 'date' and 'text' columns. Returns empty DataFrame if dataset unavailable.
         """
-        # Ensure data is downloaded
-        self._download_and_unzip_data()
+        # Ensure data is downloaded (returns False if unavailable)
+        if not self._download_and_unzip_data():
+            logger.info("News dataset unavailable - returning empty DataFrame")
+            return pd.DataFrame()
 
         if not self.news_filepath.exists():
-            logger.error(
+            logger.warning(
                 f"Kaggle news file not found after download attempt: {self.news_filepath}")
-            raise FileNotFoundError(
-                f"Kaggle news file not found: {self.news_filepath}")
+            return pd.DataFrame()
 
         logger.info(f"Loading historical news from {self.news_filepath}")
         try:
