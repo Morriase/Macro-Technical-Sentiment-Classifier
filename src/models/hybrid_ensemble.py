@@ -137,13 +137,15 @@ class HybridEnsemble:
         xgb_oof_proba = np.zeros((n_samples, n_classes))
         lstm_oof_proba = np.zeros((n_samples, n_classes))
 
-        # Stratified K-Fold
-        skf = StratifiedKFold(
-            n_splits=self.n_folds, shuffle=True, random_state=self.random_state
-        )
+        # CRITICAL: Use Time Series Split instead of StratifiedKFold
+        # TimeSeriesSplit respects temporal ordering (no shuffle!)
+        # This prevents data leakage and aligns with Walk-Forward Validation spec
+        # StratifiedKFold was causing overfitting by training on future data
+        from sklearn.model_selection import TimeSeriesSplit
+        tscv = TimeSeriesSplit(n_splits=self.n_folds)
 
         # logger.info(f"Generating OOF predictions with {self.n_folds} folds...")
-        for fold_idx, (train_idx, val_idx) in enumerate(skf.split(X, y)):
+        for fold_idx, (train_idx, val_idx) in enumerate(tscv.split(X)):
             # Only log first and last fold to reduce clutter
             if fold_idx == 0 or (fold_idx + 1) == self.n_folds:
                 logger.info(

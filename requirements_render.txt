@@ -12,14 +12,16 @@ pyarrow>=21.0.0  # Required by datasets
 TA-Lib>=0.4.28
 
 # NLP and Transformers
-transformers>=4.30.0
-huggingface-hub>=0.23.0
+transformers>=4.41.0,<5.0.0  # Required by sentence-transformers
+huggingface-hub>=0.28.1  # Required by gradio, datasets, peft, diffusers
 tokenizers>=0.13.0
 kagglehub>=0.2.0
-pydantic>=2.0,<2.12  # Gradio compatibility
+pydantic>=2.0,<2.12  # Gradio compatibility (avoid alpha versions)
+datasets>=4.1.0  # For data loading
 
 # Sentiment Analysis (FinBERT)
 sentencepiece>=0.1.99
+sentence-transformers>=2.0.0  # For embeddings
 
 # Topic Modeling
 gensim>=4.3.0

@@ -280,13 +280,19 @@ class LSTMSequenceModel:
         self.train_accs = []
         self.val_accs = []
 
-        # Loss and optimizer (with L2 regularization via weight_decay)
-        criterion = nn.CrossEntropyLoss()
+        # Loss and optimizer (with stronger L2 regularization via weight_decay)
+        criterion = nn.CrossEntropyLoss(label_smoothing=0.1)  # Add label smoothing
         optimizer = optim.Adam(self.model.parameters(),
-                               lr=self.learning_rate, weight_decay=1e-4)
+                               lr=self.learning_rate, weight_decay=1e-3)  # 10x stronger regularization
+        
+        # Learning rate scheduler - reduce LR when validation loss plateaus
+        scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode='min', factor=0.5, patience=3, verbose=False
+        )
 
         # Training loop
         best_val_loss = float('inf')
+        best_val_acc = 0.0
         patience_counter = 0
 
         for epoch in range(self.epochs):
@@ -314,6 +320,10 @@ class LSTMSequenceModel:
 
                     # Update weights after accumulating gradients
                     if (batch_idx + 1) % self.gradient_accumulation_steps == 0:
+                        # Unscale gradients and clip them
+                        self.scaler_amp.unscale_(optimizer)
+                        torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+                        
                         self.scaler_amp.step(optimizer)
                         self.scaler_amp.update()
                         optimizer.zero_grad()
@@ -325,6 +335,8 @@ class LSTMSequenceModel:
                     loss.backward()
 
                     if (batch_idx + 1) % self.gradient_accumulation_steps == 0:
+                        # Clip gradients to prevent exploding gradients
+                        torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
                         optimizer.step()
                         optimizer.zero_grad()
 
@@ -363,6 +375,9 @@ class LSTMSequenceModel:
                 # Record validation metrics
                 self.val_losses.append(val_loss)
                 self.val_accs.append(val_acc)
+                
+                # Step the learning rate scheduler
+                scheduler.step(val_loss)
 
                 # Only log every 10 epochs or at early stopping
                 if (epoch + 1) % 10 == 0:
@@ -372,9 +387,17 @@ class LSTMSequenceModel:
                         f"Train Acc: {train_acc:.4f}, Val Acc: {val_acc:.4f}"
                     )
 
-                # Early stopping
+                # Early stopping - monitor both val_loss AND val_acc
+                # Stop if val_loss improves OR val_acc improves (more robust)
+                improved = False
                 if val_loss < best_val_loss:
                     best_val_loss = val_loss
+                    improved = True
+                if val_acc > best_val_acc:
+                    best_val_acc = val_acc
+                    improved = True
+                    
+                if improved:
                     patience_counter = 0
                 else:
                     patience_counter += 1

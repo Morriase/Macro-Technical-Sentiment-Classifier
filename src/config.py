@@ -112,13 +112,13 @@ ENSEMBLE_CONFIG = {
         },
         "lstm": {
             "sequence_length": 22,  # ~1 month of trading days
-            "hidden_size": 96,  # Reduced from 128 to prevent overfitting
+            "hidden_size": 64,  # Reduced from 128 to prevent overfitting (50% reduction)
             "num_layers": 2,
-            "dropout": 0.4,  # Increased from 0.3 for stronger regularization
-            "learning_rate": 0.001,
-            "batch_size": 64,
+            "dropout": 0.5,  # Increased from 0.3 for stronger regularization
+            "learning_rate": 0.0003,  # Reduced from 0.001 for slower, more stable learning
+            "batch_size": 128,  # Increased from 64 for more stable gradients
             "epochs": 100,
-            "early_stopping_patience": 10,
+            "early_stopping_patience": 5,  # Reduced from 10 to stop overfitting sooner
         },
     },
     "meta_learner": {
@@ -143,12 +143,12 @@ WFO_CONFIG = {
     "test_window_months": 2,  # Out-of-sample period
     "step_months": 2,  # Rolling step size
     "min_train_samples": 3000,  # Reduced from 5000 for shorter windows
-    "cv_folds": 3,  # Reduced from 5 for faster training
+    "cv_folds": 3,  # Reduced from 5 for faster training (was causing 4hr+ training)
 }
 
 # Hyperparameter Optimization
 OPTUNA_CONFIG = {
-    "n_trials": 8,  # Reduced from 100 - sufficient for convergence
+    "n_trials": 5,  # Reduced from 8 for faster training (each trial takes ~45min)
     "timeout": 3600,  # 1 hour
     "n_jobs": -1,
     "optimization_metric": "profit_factor",  # or "sharpe_ratio"
