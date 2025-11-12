@@ -129,9 +129,39 @@ def load_model_and_schema(pair: str):
     return model, schema
 
 
+def resample_to_higher_timeframe(df_m5: pd.DataFrame, timeframe: str) -> pd.DataFrame:
+    """
+    Resample M5 data to higher timeframe (H1 or H4)
+    
+    Args:
+        df_m5: M5 OHLCV DataFrame with datetime index
+        timeframe: 'H1' or 'H4'
+    
+    Returns:
+        Resampled DataFrame
+    """
+    resample_rule = {'H1': '1H', 'H4': '4H'}[timeframe]
+    
+    df_resampled = df_m5.resample(resample_rule).agg({
+        'open': 'first',
+        'high': 'max',
+        'low': 'min',
+        'close': 'last',
+        'volume': 'sum'
+    }).dropna()
+    
+    return df_resampled
+
+
 def engineer_features_from_ohlcv(df_ohlcv: pd.DataFrame, pair: str) -> tuple:
     """
     Engineer features from OHLCV data using EXACT training pipeline
+    
+    CRITICAL: Must match training exactly (81 features)
+    - 67 base technical features (M5)
+    - 14 multi-timeframe features (H1 + H4)
+    - 3 macro features (tau_pre, tau_post, weighted_surprise)
+    - 0 sentiment features (not trained)
 
     Returns:
         feature_array: numpy array of features
@@ -140,24 +170,46 @@ def engineer_features_from_ohlcv(df_ohlcv: pd.DataFrame, pair: str) -> tuple:
     logger.info(
         f"Engineering features for {pair} from {len(df_ohlcv)} candles")
 
-    # Technical features (55 features)
+    # Step 1: Base technical features on M5 (67 features)
     df_features = TECH_ENGINEER.calculate_all_features(df_ohlcv.copy())
     df_features = TECH_ENGINEER.calculate_feature_crosses(df_features)
+    logger.info(f"✓ Calculated {len(df_features.columns)} base technical features")
 
-    # Macro features (3 features) - will be added after technical features
-    # Placeholder: Will be populated by engineer_macro_features()
+    # Step 2: Multi-timeframe features (14 features) - CRITICAL FIX!
+    # Resample M5 to H1 and H4 to match training pipeline
+    try:
+        df_h1 = resample_to_higher_timeframe(df_ohlcv, 'H1')
+        df_h4 = resample_to_higher_timeframe(df_ohlcv, 'H4')
+        
+        higher_timeframes = {
+            'H1': df_h1,
+            'H4': df_h4
+        }
+        
+        df_features = TECH_ENGINEER.add_multi_timeframe_features(
+            df_primary=df_features,
+            higher_timeframes=higher_timeframes
+        )
+        logger.info(f"✓ Added multi-timeframe features (H1 + H4)")
+    except Exception as e:
+        logger.error(f"Failed to add MTF features: {e}")
+        raise ValueError(f"MTF feature engineering failed: {e}")
+
+    # Step 3: Macro features (3 features) - will be populated by engineer_macro_features()
     df_features["tau_pre"] = 0.0
     df_features["tau_post"] = 0.0
     df_features["weighted_surprise"] = 0.0
 
     # Drop NaN
+    initial_len = len(df_features)
     df_features.dropna(inplace=True)
+    logger.info(f"Dropped {initial_len - len(df_features)} rows with NaNs")
 
     # Extract feature columns (SAME LOGIC AS TRAINING)
     exclude_cols = [
         "open", "high", "low", "close", "volume",
         "forward_close", "forward_return", "forward_return_pips",
-        "target", "target_class", "timestamp"
+        "target", "target_class", "timestamp", "date"
     ]
 
     feature_cols = [
@@ -291,7 +343,7 @@ def predict():
         "pair": "EUR_USD",
         "ohlcv": [
             {"timestamp": "2025-01-01 00:00:00", "open": 1.1000, "high": 1.1010, "low": 1.0990, "close": 1.1005, "volume": 1000},
-            ...
+            ...  // Need 250+ M5 candles for feature engineering
         ],
         "events": [  // OPTIONAL: Raw calendar events for macro features
             {
@@ -313,7 +365,7 @@ def predict():
         "confidence": 0.85,
         "probabilities": {"BUY": 0.85, "SELL": 0.10, "HOLD": 0.05},
         "timestamp": "2025-01-01 00:05:00",
-        "feature_count": 58,
+        "feature_count": 81,  // 67 base + 14 MTF + 3 macro + 0 sentiment
         "status": "success"
     }
     """
@@ -371,70 +423,15 @@ def predict():
         # Engineer macro features (3 features: tau_pre, tau_post, weighted_surprise)
         df_features = engineer_macro_features(events_data, df_features)
 
-        # Engineer sentiment features (live with caching)
+        # SENTIMENT FEATURES DISABLED
+        # Models were trained WITHOUT sentiment features (news dataset not attached in Kaggle)
+        # DO NOT add sentiment features here - it will cause feature count mismatch!
+        # If you want sentiment, retrain models with news data first.
         if ENABLE_LIVE_SENTIMENT:
-            logger.info("Live sentiment enabled - checking cache...")
-
-            # Check cache first (cache stored on predict function object)
-            if not hasattr(predict, '_sentiment_cache') or \
-               not hasattr(predict, '_sentiment_cache_time') or \
-               (datetime.now() - predict._sentiment_cache_time).total_seconds() > SENTIMENT_CACHE_MINUTES * 60:
-
-                logger.info("Cache miss or expired - fetching live news...")
-                end_date = datetime.now()
-                start_date = end_date - timedelta(hours=2)
-                live_news_df = NEWS_ACQUIRER.fetch_forex_news(
-                    start_date, end_date)
-
-                if not live_news_df.empty:
-                    logger.info(
-                        f"Processing {len(live_news_df)} live news articles for sentiment.")
-                    daily_sentiment = SENTIMENT_ANALYZER.aggregate_daily_sentiment(
-                        live_news_df)
-                    time_weighted_sentiment = SENTIMENT_ANALYZER.calculate_time_weighted_sentiment(
-                        daily_sentiment)
-
-                    # Cache the sentiment data
-                    predict._sentiment_cache = time_weighted_sentiment
-                    predict._sentiment_cache_time = datetime.now()
-                    logger.success("✓ Sentiment cached for future requests")
-                else:
-                    logger.warning("⚠ No live news found - caching zeros")
-                    # Cache zeros to avoid repeated API calls
-                    time_weighted_sentiment = pd.DataFrame()
-                    predict._sentiment_cache = time_weighted_sentiment
-                    predict._sentiment_cache_time = datetime.now()
-            else:
-                logger.info(
-                    f"Using cached sentiment (age: {(datetime.now() - predict._sentiment_cache_time).seconds}s)")
-                time_weighted_sentiment = predict._sentiment_cache
-
-            # Merge sentiment if we have data
-            if not time_weighted_sentiment.empty:
-                # Reset index to merge on 'date' column, then restore index
-                df_features = df_features.reset_index()
-                df_features = pd.merge(
-                    df_features,
-                    time_weighted_sentiment,
-                    left_on="date",
-                    right_on="date",
-                    how="left"
-                )
-                sentiment_cols = [
-                    col for col in time_weighted_sentiment.columns if col != "date"]
-                for col in sentiment_cols:
-                    df_features[col] = df_features[col].fillna(0.0)
-                df_features = df_features.set_index("date")
-                logger.success("✓ Live sentiment features merged")
-            else:
-                # No cached data - add zeros
-                for period in SENTIMENT_EMA_PERIODS:
-                    df_features[f"polarity_ema_{period}"] = 0.0
-                    df_features[f"positive_ema_{period}"] = 0.0
-                    df_features[f"negative_ema_{period}"] = 0.0
-        else:
-            logger.info(
-                "Live sentiment disabled - skipping sentiment features entirely")
+            logger.warning(
+                "⚠ ENABLE_LIVE_SENTIMENT=True but models not trained with sentiment! "
+                "Ignoring sentiment to match training (81 features)."
+            )
 
         # Extract final feature array
         exclude_cols = [
