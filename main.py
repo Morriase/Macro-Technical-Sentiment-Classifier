@@ -479,15 +479,17 @@ class ForexClassifierPipeline:
     def generate_predictions(
         self,
         confidence_threshold: float = 0.70,
+        use_fuzzy_quality: bool = True,
     ) -> pd.DataFrame:
         """
-        Step 5: Generate predictions for most recent data
+        Step 5: Generate predictions with fuzzy logic quality scoring
 
         Args:
             confidence_threshold: Minimum confidence for signal
+            use_fuzzy_quality: Enable fuzzy logic quality filtering
 
         Returns:
-            DataFrame with predictions and signals
+            DataFrame with predictions, signals, and quality scores
         """
         logger.info("="*60)
         logger.info("STEP 5: PREDICTION GENERATION")
@@ -509,6 +511,7 @@ class ForexClassifierPipeline:
 
         # Predict on most recent data (last 100 bars)
         X_recent = self.df_features[feature_cols].tail(100).values
+        features_recent = self.df_features.tail(100)
 
         # Generate predictions
         y_pred_proba = self.model.predict_proba(X_recent)
@@ -516,16 +519,59 @@ class ForexClassifierPipeline:
 
         # Create results DataFrame
         results = pd.DataFrame({
-            "timestamp": self.df_features.tail(100).index,
-            "close": self.df_features["close"].tail(100).values,
+            "timestamp": features_recent.index,
+            "close": features_recent["close"].values,
             "pred_buy_prob": y_pred_proba[:, 0],
             "pred_sell_prob": y_pred_proba[:, 1],
             "pred_hold_prob": y_pred_proba[:, 2],
             "predicted_class": y_pred,
         })
 
-        # Generate signals based on confidence
+        # Initialize fuzzy quality scorer
+        if use_fuzzy_quality:
+            from src.models.signal_quality import SignalQualityScorer
+            quality_scorer = SignalQualityScorer()
+            
+            # Calculate quality scores for each prediction
+            quality_scores = []
+            quality_components = []
+            position_sizes = []
+            
+            for idx, (_, row) in enumerate(results.iterrows()):
+                # Get features for this prediction
+                feature_row = features_recent.iloc[idx]
+                
+                # Calculate quality score
+                quality, components = quality_scorer.calculate_quality(
+                    prediction_proba=y_pred_proba[idx],
+                    features=feature_row,
+                    predicted_class=y_pred[idx]
+                )
+                
+                quality_scores.append(quality)
+                quality_components.append(components)
+                
+                # Get position size multiplier
+                position_sizes.append(
+                    quality_scorer.get_position_size_multiplier(quality)
+                )
+            
+            results["quality_score"] = quality_scores
+            results["position_size_pct"] = position_sizes
+            
+            # Add component scores
+            results["quality_confidence"] = [c['confidence'] for c in quality_components]
+            results["quality_trend"] = [c['trend'] for c in quality_components]
+            results["quality_volatility"] = [c['volatility'] for c in quality_components]
+            results["quality_momentum"] = [c['momentum'] for c in quality_components]
+
+        # Generate signals with fuzzy quality filtering
         def generate_signal(row):
+            # Check quality threshold first (if enabled)
+            if use_fuzzy_quality and row["quality_score"] < quality_scorer.min_quality_threshold:
+                return "HOLD"  # Skip low-quality signals
+            
+            # Then check confidence threshold
             if row["pred_buy_prob"] > confidence_threshold:
                 return "BUY"
             elif row["pred_sell_prob"] > confidence_threshold:
@@ -535,7 +581,7 @@ class ForexClassifierPipeline:
 
         results["signal"] = results.apply(generate_signal, axis=1)
 
-        # Latest signal
+        # Latest signal with quality metrics
         latest = results.iloc[-1]
         logger.info(f"\nLatest Signal ({latest['timestamp']}):")
         logger.info(f"  Close: {latest['close']:.5f}")
@@ -543,6 +589,24 @@ class ForexClassifierPipeline:
         logger.info(f"  Buy Confidence: {latest['pred_buy_prob']:.2%}")
         logger.info(f"  Sell Confidence: {latest['pred_sell_prob']:.2%}")
         logger.info(f"  Hold Confidence: {latest['pred_hold_prob']:.2%}")
+        
+        if use_fuzzy_quality:
+            logger.info(f"\n  Fuzzy Quality Score: {latest['quality_score']:.1f}/100")
+            logger.info(f"    - Confidence: {latest['quality_confidence']:.1f}/40")
+            logger.info(f"    - Trend Alignment: {latest['quality_trend']:.1f}/25")
+            logger.info(f"    - Volatility Regime: {latest['quality_volatility']:.1f}/20")
+            logger.info(f"    - Momentum Confirm: {latest['quality_momentum']:.1f}/15")
+            logger.info(f"  Position Size: {latest['position_size_pct']*100:.0f}% of base")
+            
+            # Count quality-filtered signals
+            total_signals = len(results[results['signal'] != 'HOLD'])
+            high_quality = len(results[
+                (results['signal'] != 'HOLD') & 
+                (results['quality_score'] >= 60)
+            ])
+            logger.info(f"\n  Signal Quality Summary:")
+            logger.info(f"    Total Signals: {total_signals}")
+            logger.info(f"    High Quality (≥60): {high_quality} ({high_quality/max(1,total_signals)*100:.0f}%)")
 
         # Save predictions
         pred_path = RESULTS_DIR / f"{self.currency_pair}_predictions.csv"
@@ -592,8 +656,12 @@ class ForexClassifierPipeline:
             # Step 4: Train model
             self.train_model(use_walk_forward=use_walk_forward)
 
-            # Step 5: Generate predictions
-            predictions = self.generate_predictions()
+            # Step 5: Generate predictions with fuzzy quality scoring
+            from src.config import RISK_MANAGEMENT
+            predictions = self.generate_predictions(
+                confidence_threshold=RISK_MANAGEMENT.get("base_confidence_threshold", 0.70),
+                use_fuzzy_quality=RISK_MANAGEMENT.get("use_fuzzy_quality", True)
+            )
 
             elapsed = datetime.now() - start_time
             logger.info("="*60)

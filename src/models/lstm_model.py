@@ -139,6 +139,10 @@ class LSTMSequenceModel:
         epochs: int = 100,
         early_stopping_patience: int = 10,
         device: Optional[str] = None,
+        l1_lambda: float = 1e-5,
+        l2_lambda: float = 2e-3,
+        beta1: float = 0.9,
+        beta2: float = 0.999,
     ):
         """
         Initialize LSTM sequence model
@@ -166,6 +170,12 @@ class LSTMSequenceModel:
         self.batch_size = batch_size
         self.epochs = epochs
         self.early_stopping_patience = early_stopping_patience
+        # Regularization parameters
+        self.l1_lambda = l1_lambda
+        self.l2_lambda = l2_lambda
+        # Optimizer momentum parameters
+        self.beta1 = beta1
+        self.beta2 = beta2
 
         # Device - use config or auto-detect
         if device is None:
@@ -280,10 +290,22 @@ class LSTMSequenceModel:
         self.train_accs = []
         self.val_accs = []
 
-        # Loss and optimizer (with stronger L2 regularization via weight_decay)
+        # Loss and optimizer with L1 + L2 regularization
         criterion = nn.CrossEntropyLoss(label_smoothing=0.1)  # Add label smoothing
-        optimizer = optim.Adam(self.model.parameters(),
-                               lr=self.learning_rate, weight_decay=1e-3)  # 10x stronger regularization
+        
+        # Use instance regularization parameters
+        l1_lambda = self.l1_lambda
+        l2_lambda = self.l2_lambda
+        beta1 = self.beta1
+        beta2 = self.beta2
+        
+        # Adam optimizer with L2 regularization (weight_decay) and custom momentum
+        optimizer = optim.Adam(
+            self.model.parameters(),
+            lr=self.learning_rate,
+            betas=(beta1, beta2),  # Momentum parameters
+            weight_decay=l2_lambda  # L2 regularization
+        )
         
         # Learning rate scheduler - reduce LR when validation loss plateaus
         scheduler = optim.lr_scheduler.ReduceLROnPlateau(
@@ -313,6 +335,12 @@ class LSTMSequenceModel:
                     with autocast('cuda'):
                         outputs = self.model(X_batch)
                         loss = criterion(outputs, y_batch)
+                        
+                        # Add L1 regularization (Lasso) manually
+                        if l1_lambda > 0:
+                            l1_penalty = sum(p.abs().sum() for p in self.model.parameters())
+                            loss = loss + l1_lambda * l1_penalty
+                    
                     # Scale loss for gradient accumulation
                     loss = loss / self.gradient_accumulation_steps
                     # Backward pass with scaled gradients
@@ -331,6 +359,12 @@ class LSTMSequenceModel:
                     # Standard training without AMP
                     outputs = self.model(X_batch)
                     loss = criterion(outputs, y_batch)
+                    
+                    # Add L1 regularization (Lasso) manually
+                    if l1_lambda > 0:
+                        l1_penalty = sum(p.abs().sum() for p in self.model.parameters())
+                        loss = loss + l1_lambda * l1_penalty
+                    
                     loss = loss / self.gradient_accumulation_steps
                     loss.backward()
 
