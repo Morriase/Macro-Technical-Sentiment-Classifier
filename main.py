@@ -325,11 +325,12 @@ class ForexClassifierPipeline:
             logger.info(f"Using fixed threshold: {threshold} pips")
         else:
             # ATR-based adaptive threshold
-            if "atr" not in self.df_features.columns:
-                raise ValueError("ATR not found in features. Cannot use ATR-based threshold.")
+            atr_col = "atr_14"  # ATR with 14-period (from config)
+            if atr_col not in self.df_features.columns:
+                raise ValueError(f"ATR column '{atr_col}' not found in features. Cannot use ATR-based threshold.")
             
             # Convert ATR to pips and apply multiplier
-            threshold_series = (self.df_features["atr"] * pip_multiplier * atr_multiplier)
+            threshold_series = (self.df_features[atr_col] * pip_multiplier * atr_multiplier)
             logger.info(f"Using ATR-based threshold: {atr_multiplier}x ATR")
             logger.info(f"ATR threshold range: {threshold_series.min():.2f} to {threshold_series.max():.2f} pips")
             logger.info(f"Mean ATR threshold: {threshold_series.mean():.2f} pips")
