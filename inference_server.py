@@ -465,20 +465,61 @@ def predict():
 
         # Map class to signal
         class_map = {0: "SELL", 1: "HOLD", 2: "BUY"}
-        signal = class_map[prediction_class]
+        raw_signal = class_map[prediction_class]
         confidence = float(prediction_proba[prediction_class])
 
-        # Prepare response
+        # Apply fuzzy logic quality scoring (same as training pipeline)
+        from src.models.signal_quality import SignalQualityScorer
+        quality_scorer = SignalQualityScorer()
+        
+        # Get the last feature row for quality calculation
+        last_features = df_features.iloc[-1]
+        
+        # Calculate quality score
+        quality_score, quality_components = quality_scorer.calculate_quality(
+            prediction_proba=prediction_proba,
+            features=last_features,
+            predicted_class=prediction_class
+        )
+        
+        # Get position size multiplier
+        position_size_pct = quality_scorer.get_position_size_multiplier(quality_score)
+        
+        # Apply quality filter (override signal if quality too low)
+        if quality_score < quality_scorer.min_quality_threshold:
+            signal = "HOLD"  # Override to HOLD if quality too low
+            quality_filtered = True
+            logger.warning(
+                f"{original_pair}: Signal {raw_signal} filtered to HOLD due to low quality ({quality_score:.1f}/100)"
+            )
+        else:
+            signal = raw_signal
+            quality_filtered = False
+
+        # Prepare response with fuzzy quality metrics
         response = {
             'pair': original_pair,  # Return original pair name (e.g., BTCUSD)
             'model_pair': pair,  # Show which model was used (e.g., EUR_USD)
             'prediction': signal,
+            'raw_prediction': raw_signal,  # Original model prediction before quality filter
             'confidence': round(confidence, 4),
             'probabilities': {
                 'BUY': round(float(prediction_proba[2]), 4),
                 'SELL': round(float(prediction_proba[0]), 4),
                 'HOLD': round(float(prediction_proba[1]), 4)
             },
+            # Fuzzy quality metrics
+            'quality_score': round(quality_score, 2),
+            'quality_components': {
+                'confidence': round(quality_components['confidence'], 2),
+                'trend': round(quality_components['trend'], 2),
+                'volatility': round(quality_components['volatility'], 2),
+                'momentum': round(quality_components['momentum'], 2)
+            },
+            'position_size_pct': round(position_size_pct, 2),
+            'quality_filtered': quality_filtered,
+            'should_trade': quality_scorer.should_trade(quality_score),
+            # Metadata
             'timestamp': df_ohlcv.index[-1].isoformat(),
             'feature_count': len(feature_names),
             'candles_processed': len(df_ohlcv),
@@ -486,8 +527,11 @@ def predict():
             'status': 'success'
         }
 
+        # Enhanced logging with quality metrics
         logger.success(
-            f"{original_pair} ({pair} model): {signal} (confidence: {confidence:.2%})")
+            f"{original_pair} ({pair} model): {signal} (confidence: {confidence:.2%}, "
+            f"quality: {quality_score:.1f}/100, position: {position_size_pct*100:.0f}%)"
+        )
         return jsonify(response)
 
     except FileNotFoundError as e:
