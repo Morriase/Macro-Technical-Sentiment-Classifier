@@ -281,14 +281,16 @@ class ForexClassifierPipeline:
     def create_target(
         self,
         forward_window_hours: int = 24,
-        min_move_pips: float = 5.0,  # Lowered from 10.0 to reduce HOLD bias
+        min_move_pips: float = None,  # If None, use ATR-based threshold
+        atr_multiplier: float = 0.5,  # ATR multiplier for adaptive threshold
     ):
         """
-        Step 3: Create target variable
+        Step 3: Create target variable with ATR-based adaptive thresholds
 
         Args:
             forward_window_hours: Hours ahead to look for movement
-            min_move_pips: Minimum pips move to classify as directional
+            min_move_pips: Fixed pips threshold (if None, uses ATR-based)
+            atr_multiplier: Multiplier for ATR-based threshold (default 0.5x ATR)
         """
         logger.info("="*60)
         logger.info("STEP 3: TARGET CREATION")
@@ -316,10 +318,50 @@ class ForexClassifierPipeline:
             self.df_features["forward_return"] * pip_multiplier
         )
 
-        # Create ternary target: Buy (1), Hold (0), Sell (-1)
+        # Determine threshold: fixed pips or ATR-based
+        if min_move_pips is not None:
+            # Fixed threshold
+            threshold = min_move_pips
+            logger.info(f"Using fixed threshold: {threshold} pips")
+        else:
+            # ATR-based adaptive threshold
+            if "atr" not in self.df_features.columns:
+                raise ValueError("ATR not found in features. Cannot use ATR-based threshold.")
+            
+            # Convert ATR to pips and apply multiplier
+            threshold_series = (self.df_features["atr"] * pip_multiplier * atr_multiplier)
+            logger.info(f"Using ATR-based threshold: {atr_multiplier}x ATR")
+            logger.info(f"ATR threshold range: {threshold_series.min():.2f} to {threshold_series.max():.2f} pips")
+            logger.info(f"Mean ATR threshold: {threshold_series.mean():.2f} pips")
+            
+            # Create conditions with dynamic threshold
+            conditions = [
+                self.df_features["forward_return_pips"] > threshold_series,   # Buy
+                self.df_features["forward_return_pips"] < -threshold_series,  # Sell
+            ]
+            choices = [1, -1]
+            self.df_features["target"] = np.select(conditions, choices, default=0)
+            
+            # Map to 0, 1, 2 for sklearn
+            target_map = {-1: 1, 0: 2, 1: 0}  # Sell=1, Hold=2, Buy=0
+            self.df_features["target_class"] = self.df_features["target"].map(target_map)
+            
+            # Drop future data
+            self.df_features.dropna(subset=["forward_close"], inplace=True)
+            
+            # Class distribution
+            class_counts = self.df_features["target_class"].value_counts().sort_index()
+            logger.info("Target class distribution (ATR-based):")
+            for cls, count in class_counts.items():
+                class_name = ["Buy", "Sell", "Hold"][cls]
+                pct = count / len(self.df_features) * 100
+                logger.info(f"  {class_name}: {count} ({pct:.1f}%)")
+            return
+
+        # Fixed threshold logic (original)
         conditions = [
-            self.df_features["forward_return_pips"] > min_move_pips,   # Buy
-            self.df_features["forward_return_pips"] < -min_move_pips,  # Sell
+            self.df_features["forward_return_pips"] > threshold,   # Buy
+            self.df_features["forward_return_pips"] < -threshold,  # Sell
         ]
         choices = [1, -1]
         self.df_features["target"] = np.select(conditions, choices, default=0)
@@ -538,8 +580,13 @@ class ForexClassifierPipeline:
             # Step 2: Engineer features
             self.engineer_features()
 
-            # Step 3: Create target
-            self.create_target()
+            # Step 3: Create target (ATR-based adaptive threshold)
+            from src.config import TARGET_CONFIG
+            self.create_target(
+                forward_window_hours=TARGET_CONFIG.get("forward_window_hours", 24),
+                min_move_pips=TARGET_CONFIG.get("min_move_threshold_pips"),
+                atr_multiplier=TARGET_CONFIG.get("atr_multiplier", 0.5)
+            )
 
             # Step 4: Train model
             self.train_model(use_walk_forward=use_walk_forward)
