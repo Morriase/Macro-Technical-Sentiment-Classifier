@@ -105,8 +105,8 @@ def load_model_and_schema(pair: str):
 
     logger.info(f"Loading model for {pair}...")
 
-    # Load model
-    model_path = MODELS_DIR / f"{pair}_model.pth"
+    # Load model (without .pth extension - the save_model method adds suffixes)
+    model_path = MODELS_DIR / f"{pair}_model"
     if not Path(f"{model_path}_config.pkl").exists():
         raise FileNotFoundError(f"Model not found for {pair}")
 
@@ -132,7 +132,7 @@ def load_model_and_schema(pair: str):
 def engineer_features_from_ohlcv(df_m5: pd.DataFrame, df_h1: pd.DataFrame, df_h4: pd.DataFrame, pair: str) -> tuple:
     """
     Engineer features from OHLCV data using EXACT training pipeline
-    
+
     CRITICAL: Must match training exactly (81 features)
     - 67 base technical features (M5)
     - 14 multi-timeframe features (H1 + H4)
@@ -155,7 +155,8 @@ def engineer_features_from_ohlcv(df_m5: pd.DataFrame, df_h1: pd.DataFrame, df_h4
     # Step 1: Base technical features on M5 (67 features)
     df_features = TECH_ENGINEER.calculate_all_features(df_m5.copy())
     df_features = TECH_ENGINEER.calculate_feature_crosses(df_features)
-    logger.info(f"✓ Calculated {len(df_features.columns)} base technical features")
+    logger.info(
+        f"✓ Calculated {len(df_features.columns)} base technical features")
 
     # Step 2: Multi-timeframe features (14 features) using REAL H1/H4 data
     try:
@@ -163,7 +164,7 @@ def engineer_features_from_ohlcv(df_m5: pd.DataFrame, df_h1: pd.DataFrame, df_h4
             'H1': df_h1,
             'H4': df_h4
         }
-        
+
         df_features = TECH_ENGINEER.add_multi_timeframe_features(
             df_primary=df_features,
             higher_timeframes=higher_timeframes
@@ -387,23 +388,24 @@ def predict():
         df_m5 = pd.DataFrame(ohlcv_m5_data)
         df_m5['timestamp'] = pd.to_datetime(df_m5['timestamp'])
         df_m5.set_index('timestamp', inplace=True)
-        
+
         df_h1 = pd.DataFrame(ohlcv_h1_data)
         df_h1['timestamp'] = pd.to_datetime(df_h1['timestamp'])
         df_h1.set_index('timestamp', inplace=True)
-        
+
         df_h4 = pd.DataFrame(ohlcv_h4_data)
         df_h4['timestamp'] = pd.to_datetime(df_h4['timestamp'])
         df_h4.set_index('timestamp', inplace=True)
 
         # Validate OHLCV data for all timeframes
         required_cols = ['open', 'high', 'low', 'close', 'volume']
-        
+
         for tf_name, df_tf in [('M5', df_m5), ('H1', df_h1), ('H4', df_h4)]:
-            missing_cols = [col for col in required_cols if col not in df_tf.columns]
+            missing_cols = [
+                col for col in required_cols if col not in df_tf.columns]
             if missing_cols:
                 return jsonify({'error': f'Missing {tf_name} OHLCV columns: {missing_cols}'}), 400
-            
+
             # Check minimum data
             if len(df_tf) < 250:
                 return jsonify({
@@ -465,20 +467,21 @@ def predict():
         # Apply fuzzy logic quality scoring (same as training pipeline)
         from src.models.signal_quality import SignalQualityScorer
         quality_scorer = SignalQualityScorer()
-        
+
         # Get the last feature row for quality calculation
         last_features = df_features.iloc[-1]
-        
+
         # Calculate quality score
         quality_score, quality_components = quality_scorer.calculate_quality(
             prediction_proba=prediction_proba,
             features=last_features,
             predicted_class=prediction_class
         )
-        
+
         # Get position size multiplier
-        position_size_pct = quality_scorer.get_position_size_multiplier(quality_score)
-        
+        position_size_pct = quality_scorer.get_position_size_multiplier(
+            quality_score)
+
         # Apply quality filter (override signal if quality too low)
         if quality_score < quality_scorer.min_quality_threshold:
             signal = "HOLD"  # Override to HOLD if quality too low
