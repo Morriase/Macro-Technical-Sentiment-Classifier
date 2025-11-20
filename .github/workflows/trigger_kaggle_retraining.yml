@@ -1,0 +1,38 @@
+name: Trigger Kaggle Retraining
+
+on:
+  schedule:
+    # Run every Sunday at 2 AM UTC
+    - cron: '0 2 * * 0'
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  trigger-kaggle:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Trigger Kaggle Notebook
+      env:
+        KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+        KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+      run: |
+        # Install Kaggle CLI
+        pip install kaggle
+        
+        # Configure Kaggle credentials
+        mkdir -p ~/.kaggle
+        echo '{"username":"${{ secrets.KAGGLE_USERNAME }}","key":"${{ secrets.KAGGLE_KEY }}"}' > ~/.kaggle/kaggle.json
+        chmod 600 ~/.kaggle/kaggle.json
+        
+        # Trigger notebook run
+        # Replace 'your-username/forex-model-retraining' with your actual notebook path
+        kaggle kernels push -p kaggle_notebooks/
+        
+        echo "✅ Kaggle notebook triggered!"
+        echo "Training will complete in ~2-3 hours"
+        echo "Check progress at: https://www.kaggle.com/code/your-username/forex-model-retraining"
+    
+    - name: Send notification
+      run: |
+        echo "🚀 Kaggle retraining pipeline started"
+        echo "Models will auto-deploy to HF if improved"
