@@ -1,0 +1,92 @@
+name: Retrain and Deploy Models
+
+on:
+  schedule:
+    # Run every Sunday at 2 AM UTC
+    - cron: '0 2 * * 0'
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  retrain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360  # 6 hours max
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+      with:
+        lfs: true
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    
+    - name: Install TA-Lib
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y wget build-essential
+        wget http://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz
+        tar -xzf ta-lib-0.4.0-src.tar.gz
+        cd ta-lib/
+        ./configure --prefix=/usr
+        make
+        sudo make install
+        sudo ldconfig
+    
+    - name: Install Python dependencies
+      run: |
+        pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: Download latest data from Kaggle
+      env:
+        KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+        KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+      run: |
+        mkdir -p ~/.kaggle
+        echo '{"username":"${{ secrets.KAGGLE_USERNAME }}","key":"${{ secrets.KAGGLE_KEY }}"}' > ~/.kaggle/kaggle.json
+        chmod 600 ~/.kaggle/kaggle.json
+        python -c "from src.data_acquisition.kaggle_loader import download_all_datasets; download_all_datasets()"
+    
+    - name: Backup current models
+      run: |
+        mkdir -p models_backup
+        cp -r models/* models_backup/ || true
+    
+    - name: Train new models
+      run: |
+        python train_pipeline.py --pairs EUR_USD GBP_USD USD_JPY AUD_USD
+    
+    - name: Compare model performance
+      id: compare
+      run: |
+        python scripts/compare_models.py --old models_backup --new models --output comparison.json
+        echo "should_deploy=$(cat comparison.json | jq -r '.should_deploy')" >> $GITHUB_OUTPUT
+    
+    - name: Commit and push new models
+      if: steps.compare.outputs.should_deploy == 'true'
+      run: |
+        git config user.name "GitHub Actions Bot"
+        git config user.email "actions@github.com"
+        git add models/
+        git commit -m "Auto-retrain: Deploy improved models [skip ci]"
+        git push origin main
+    
+    - name: Trigger HF Space rebuild
+      if: steps.compare.outputs.should_deploy == 'true'
+      env:
+        HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      run: |
+        curl -X POST \
+          -H "Authorization: Bearer $HF_TOKEN" \
+          https://huggingface.co/api/spaces/morriase/forex-live_server/restart
+    
+    - name: Send notification
+      if: always()
+      run: |
+        if [ "${{ steps.compare.outputs.should_deploy }}" == "true" ]; then
+          echo "✅ New models deployed - Performance improved!"
+        else
+          echo "⏭️ Skipped deployment - Current models are better"
+        fi
