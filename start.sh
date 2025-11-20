@@ -24,14 +24,23 @@ python -c "from inference_server import app; print('✓ App imported successfull
 
 echo "Starting Gunicorn..."
 
-# Start gunicorn with reduced workers for stability
+# Start gunicorn optimized for Render free tier (512MB RAM)
+# - 1 worker to minimize memory usage
+# - 1 thread to prevent concurrent model loading
+# - preload to load models once at startup
+# - max-requests to restart worker periodically (prevent memory leaks)
+# - worker-class sync for stability
 exec gunicorn \
     --workers 1 \
-    --threads 2 \
+    --threads 1 \
+    --worker-class sync \
     --timeout 300 \
+    --graceful-timeout 30 \
+    --max-requests 100 \
+    --max-requests-jitter 10 \
     --bind 0.0.0.0:$PORT \
     --access-logfile - \
     --error-logfile - \
-    --log-level debug \
+    --log-level info \
     --preload \
     inference_server:app

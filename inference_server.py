@@ -9,6 +9,7 @@ Architecture:
 - Server returns predictions with confidence scores
 """
 import os
+import gc
 from src.config import MODELS_DIR, CURRENCY_PAIRS, SENTIMENT_EMA_PERIODS, ENABLE_LIVE_SENTIMENT, SENTIMENT_CACHE_MINUTES
 from src.feature_engineering.technical_features import TechnicalFeatureEngineer
 from src.data_acquisition.macro_data import MacroDataAcquisition
@@ -531,18 +532,27 @@ def predict():
             f"{original_pair} ({pair} model): {signal} (confidence: {confidence:.2%}, "
             f"quality: {quality_score:.1f}/100, position: {position_size_pct*100:.0f}%)"
         )
+
+        # Memory cleanup for Render free tier (512MB RAM)
+        # Clear temporary DataFrames and trigger garbage collection
+        del df_m5, df_h1, df_h4, df_features, feature_array
+        gc.collect()
+
         return jsonify(response)
 
     except FileNotFoundError as e:
         logger.error(f"Model not found: {e}")
+        gc.collect()  # Cleanup on error
         return jsonify({'error': f'Model not found: {str(e)}'}), 404
 
     except ValueError as e:
         logger.error(f"Validation error: {e}")
+        gc.collect()  # Cleanup on error
         return jsonify({'error': f'Validation error: {str(e)}'}), 400
 
     except Exception as e:
         logger.error(f"Prediction error: {e}")
+        gc.collect()  # Cleanup on error
         return jsonify({'error': f'Internal error: {str(e)}'}), 500
 
 
