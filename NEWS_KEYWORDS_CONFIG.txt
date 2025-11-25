@@ -1,0 +1,33 @@
+News Keywords Configuration for Supported Currency Pairs
+======================================================
+
+This file categorizes news keywords based on the currencies involved in each supported pair.
+The EA requires keyword inputs tailored to the currencies in the pair to filter news events effectively.
+
+Supported Pairs and Their Currency-Based Keywords:
+---------------------------------------------------
+
+EURUSD 
+EUR,USD
+ECB,InterestRate,RateDecision,CPI,CoreCPI,HICP,GDP,Unemployment,UnemploymentRate,RetailSales,PMI,ManufacturingPMI,ServicesPMI,GermanIFO,ZEW,IndustrialProduction,TradeBalance,ECBSpeech,ECBMinutes,BondYields,FiscalPolicy,Budget,EconomicSentiment,NFP,Non-Farm,FOMC,Fed,PCE,CorePCE,ISM,ManufacturingISM,ServicesISM,InitialJoblessClaims,ADP,TreasuryYields,FedSpeech,FedMinutes,ConsumerConfidence,HousingStarts,BuildingPermits
+
+GBPUSD 
+GBP,USD
+BoE,InterestRate,RateDecision,CPI,CoreCPI,GDP,UnemploymentRate,ClaimantCount,AverageEarnings,RetailSales,PMI,ManufacturingPMI,ServicesPMI,BoESpeech,BoEMinutes,FiscalPolicy,BudgetRelease,TradeBalance,IndustrialProduction,NFP,Non-Farm,FOMC,Fed,PCE,CorePCE,ISM,JoblessClaims,ADP,TreasuryYields,FedSpeech,FedMinutes,HousingData
+
+USDJPY 
+USD,JPY
+NFP,Non-Farm,FOMC,Fed,InterestRate,RateDecision,CPI,CoreCPI,PCE,CorePCE,GDP,RetailSales,PMI,ISM,UnemploymentRate,JoblessClaims,ADP,TreasuryYields,FedSpeech,BoJ,BoJStatement,BoJOutlookReport,BoJSpeech,TankanSurvey,IndustrialProduction,TradeBalance,10-YearJGBYield,BondAuctions
+
+AUDUSD 
+AUD,USD
+RBA,InterestRate,RateDecision,CPI,TrimmedMeanCPI,GDP,UnemploymentRate,EmploymentChange,RetailSales,PMI,NABBusinessConfidence,WestpacConsumerSentiment,TradeBalance,RBASpeech,RBAMinutes,CommodityPrices,IronOre,NFP,Non-Farm,FOMC,Fed,PCE,CorePCE,ISM,ADP,TreasuryYields,FedSpeech,HousingData
+
+How to Use in EA:
+-----------------
+- For each pair, input the combined keywords into the "keyNews" parameter.
+- Separate keywords with commas or semicolons as per the "separator" setting.
+- The EA will monitor news events containing these keywords for the relevant currencies.
+- Adjust "DaysNewsLookup" and "StopBeforeMin" to control how far ahead and how long before news to avoid trading.
+
+Note: These keywords are derived from common economic indicators and central bank references. Customize as needed based on your trading strategy.

@@ -41,8 +41,9 @@ FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY", "")
 TRADING_ECONOMICS_API_KEY = os.getenv("TRADING_ECONOMICS_API_KEY", "")
 
 # Currency Pairs Configuration
-CURRENCY_PAIRS = ["EUR_USD", "GBP_USD", "USD_JPY", "AUD_USD"]
-PRIMARY_PAIR = "EUR_USD"
+CURRENCY_PAIRS = ["USD_CAD", "USD_CHF", "XAU_USD"]
+
+PRIMARY_PAIR = "XAU_USD"  # Primary pair for training and evaluation
 
 # Data Acquisition Settings
 FX_DATA_GRANULARITY = "M5"  # 5-minute candles for high-fidelity
@@ -112,16 +113,21 @@ ENSEMBLE_CONFIG = {
         },
         "lstm": {
             "sequence_length": 22,  # ~1 month of trading days
-            "hidden_size": 72,  # Slightly increased from 64 for better capacity (some folds underfit)
+            # Slightly increased from 64 for better capacity (some folds underfit)
+            "hidden_size": 72,
             "num_layers": 2,
-            "dropout": 0.5,  # Reduced from 0.55 (was too aggressive, causing inconsistency)
+            # Reduced from 0.55 (was too aggressive, causing inconsistency)
+            "dropout": 0.5,
             "learning_rate": 0.00025,  # Reduced from 0.0003 for smoother convergence
-            "batch_size": 256,  # Increased from 128 for more stable gradients (less spiking)
+            # Increased from 128 for more stable gradients (less spiking)
+            "batch_size": 256,
             "epochs": 100,
             "early_stopping_patience": 10,  # Increased from 8 for more consistent convergence
             # Regularization (L2 only for now - simpler and effective)
-            "l1_lambda": 0.0,  # L1 disabled (can enable later for feature selection)
-            "l2_lambda": 1.2e-3,  # Reduced from 1.5e-3 (slightly less aggressive)
+            # L1 disabled (can enable later for feature selection)
+            "l1_lambda": 0.0,
+            # Reduced from 1.5e-3 (slightly less aggressive)
+            "l2_lambda": 1.2e-3,
             # Optimizer momentum (Adam parameters)
             "beta1": 0.9,  # Momentum coefficient (default 0.9)
             "beta2": 0.999,  # RMSprop coefficient (default 0.999)
@@ -149,12 +155,14 @@ WFO_CONFIG = {
     "test_window_months": 2,  # Out-of-sample period
     "step_months": 2,  # Rolling step size
     "min_train_samples": 3000,  # Reduced from 5000 for shorter windows
-    "cv_folds": 3,  # Reduced from 5 for faster training (was causing 4hr+ training)
+    # Reduced from 5 for faster training (was causing 4hr+ training)
+    "cv_folds": 3,
 }
 
 # Hyperparameter Optimization
 OPTUNA_CONFIG = {
-    "n_trials": 5,  # Reduced from 8 for faster training (each trial takes ~45min)
+    # Reduced from 8 for faster training (each trial takes ~45min)
+    "n_trials": 5,
     "timeout": 3600,  # 1 hour
     "n_jobs": -1,
     "optimization_metric": "profit_factor",  # or "sharpe_ratio"
@@ -248,6 +256,7 @@ TARGET_CONFIG = {
     # "ternary" (Buy/Sell/Hold) or "binary" (Up/Down)
     "classification_type": "ternary",
     "forward_window_hours": 24,
-    "min_move_threshold_pips": 4.0,  # Fixed 4 pips (was None=ATR-based, caused 68% signals)
+    # Fixed 4 pips (was None=ATR-based, caused 68% signals)
+    "min_move_threshold_pips": 4.0,
     "atr_multiplier": 0.6,  # Only used if min_move_threshold_pips is None
 }

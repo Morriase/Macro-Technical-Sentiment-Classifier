@@ -227,14 +227,22 @@ class PortfolioEnsemble:
         # Get common timestamps
         timestamps = self._get_common_timestamps()
 
-        # Build signal matrix
+        # Build signal matrix - convert string signals to numeric
         signal_data = {}
         for pair, predictions in self.pair_predictions.items():
             signals = []
             for ts in timestamps:
                 pred = predictions[predictions['timestamp'] == ts]
                 if not pred.empty:
-                    signals.append(pred.iloc[0]['signal'])
+                    signal_str = pred.iloc[0]['signal']
+                    # Convert string signals to numeric for correlation
+                    if signal_str == 'BUY':
+                        signal_val = 1
+                    elif signal_str == 'SELL':
+                        signal_val = -1
+                    else:  # HOLD
+                        signal_val = 0
+                    signals.append(signal_val)
                 else:
                     signals.append(0)
             signal_data[pair] = signals

@@ -6,14 +6,18 @@
 #property copyright "Auron Automations" 
 #property link "https://www.auronautomations.app"
 #property version   "1.00"
-#property description "Guardian AI"
+#property description "Auron AI"
 #property strict
+#define PRODUCT_ID "Auron AI"
+
+#include "core_functions.mqh"
 #include <Trade\Trade.mqh>
+#include <verification.mqh>
 
-CTrade         trade; 
-CPositionInfo  posinfo; 
-COrderInfo     orderinfo; 
-
+CTrade            trade; 
+CPositionInfo     posInfo; 
+COrderInfo        ordInfo; 
+CLicenseVerifier  licenseVerifier; 
 
 enum    RiskType        {  systemRisk = 0,      // System defined risk (By confidence)
                            userRisk = 1,        // Risk defined By You
@@ -25,7 +29,8 @@ enum    StopLossMode    {  atrBased = 0,      // ATR-based (Adaptive to volatili
                            percentage = 2     // Percentage of price
                         };
 
-enum    TrType          {  Highlow=1,        // Previous low or high 
+enum    TrType          {  Chandelier = 0,   // Use Chandelier Exit
+                           Highlow=1,        // Previous low or high 
                            FixedPips=2,      // Defined no of pips 
                            PctofPrice = 3    // Trail stoploss as % of distance from the TP 
                         }; 
@@ -49,25 +54,89 @@ enum    AutoCloseTime    {
 enum SeparatorSymbol    {
                           comma = 0,         // Comma
                           semiColon = 1      // Semi-colon 
-                        };                                                 
+                        };
+
+enum TimeHour           {
+                          H00_12AM = 0,      // 12:00 AM (Midnight)
+                          H01_1AM = 1,       // 1:00 AM
+                          H02_2AM = 2,       // 2:00 AM
+                          H03_3AM = 3,       // 3:00 AM
+                          H04_4AM = 4,       // 4:00 AM
+                          H05_5AM = 5,       // 5:00 AM
+                          H06_6AM = 6,       // 6:00 AM
+                          H07_7AM = 7,       // 7:00 AM
+                          H08_8AM = 8,       // 8:00 AM
+                          H09_9AM = 9,       // 9:00 AM
+                          H10_10AM = 10,     // 10:00 AM
+                          H11_11AM = 11,     // 11:00 AM
+                          H12_12PM = 12,     // 12:00 PM (Noon)
+                          H13_1PM = 13,      // 1:00 PM
+                          H14_2PM = 14,      // 2:00 PM
+                          H15_3PM = 15,      // 3:00 PM
+                          H16_4PM = 16,      // 4:00 PM
+                          H17_5PM = 17,      // 5:00 PM
+                          H18_6PM = 18,      // 6:00 PM
+                          H19_7PM = 19,      // 7:00 PM
+                          H20_8PM = 20,      // 8:00 PM
+                          H21_9PM = 21,      // 9:00 PM
+                          H22_10PM = 22,     // 10:00 PM
+                          H23_11PM = 23      // 11:00 PM
+                        };
+enum TimeMinute         {
+                          min_0 = 0,
+                          min_5 = 5, 
+                          min_10 = 10, 
+                          min_15 = 15, 
+                          min_20 = 20,
+                          min_25 = 25,
+                          min_30 = 30,
+                          min_35 = 35, 
+                          min_40 = 40, 
+                          min_45 = 45,
+                          min_50 = 50,
+                          min_55 = 55, 
+                        };                        
+input group "+++ Verify source +++"
+   input string ServerUrl = "https://auronautomations.app";   // Server URL (https://auronautomations.app)
+
+input group "++++ LICENCING +++"
+
+   input string LicenseKey = "";   // User-provided license key
+   input bool DebugMode = true;  // Enable/disable debug logging
+
 input group "/--- Input Parameters ---/"
 
-   input string            RestServerURL =  "https://morriase-forex-live-server.hf.space/predict";   // REST API URL
+   input string            RestServerURL =  "https://morriase-forex-live-server.hf.space/predict";   // FAST API URL
    input long              inpMagic = 123456;                                 // EA magic number
    input IntervalTime      UpdateIntervalSeconds = 0;                         // Update interval
    input int               updateSeconds = 10;                                // Update interval in Seconds if "Every X Seconds" selected
    input double            MinConfidence = 0.55;                              // Minimum confidence
+   
+input group "/--- Stop Loss & Take Profit Settings ---/"
    input StopLossMode      SLMode = atrBased;                                 // Stop loss calculation mode
-   input double            ATRMultiplier = 2.5;                               // ATR multiplier for SL (if atrBased)
-   input int               ATRPeriod = 14;                                    // ATR period
+   input bool              UseAdaptiveATR = true;                             // Use adaptive ATR multiplier based on volatility
+   input double            ATRMultiplierLow = 2.0;                            // ATR multiplier for LOW volatility (calm markets)
+   input double            ATRMultiplierMedium = 2.5;                         // ATR multiplier for MEDIUM volatility (normal)
+   input double            ATRMultiplierHigh = 3.5;                           // ATR multiplier for HIGH volatility (trending/news)
+   input int               ATRPeriod = 14;                                    // ATR period (14 = standard, 7 = sensitive, 21 = smooth)
+   input int               ATRVolatilityPeriod = 50;                          // Period to measure volatility regime (50 bars)
    input int               StopLossPips = 50;                                 // Stop loss in pips (if fixedPips mode)
    input double            SLPercentage = 0.5;                                // SL as % of price (if percentage mode)
    input double            MinRiskReward = 2.0;                               // Minimum R:R ratio
    input bool              EnableTrading = false;                             // Enable actual trading
    input bool              ShowDebugInfo = true;                              // Show debug logs
    input bool              PredictOnStart = true;                             // Make prediction on EA start
-   input ENUM_TIMEFRAMES   AnalysisTimeframe = PERIOD_M15;                    // Timeframe for analysis (ATR, trailing stops)
-
+   input ENUM_TIMEFRAMES   AnalysisTimeframe = PERIOD_M5;                    // Timeframe for analysis (ATR, trailing stops)
+   
+input group "/--- Trailing Stoploss params ---/"  
+   input SLType   SLT = 0;                         // Use Trailing stoploss (TSL)? (No = Fixed Stoploss)
+   input TrType   trailType = 0;                   // If using TSL, what type of TSL? 
+   input int      BarsN = 20;                      // Number of bars to scan for highs and lows
+   input int      HighLowBuffer = 3;               // Buffer from prev low or high to trail (If selected) 
+   input int      trailFixedpips = 10;             // Number of pips to trail SL (If option is selected)
+   input double   TslPercent = 1.0;                // Percentage of ptice to TSL
+   input double   TslPercentTP = 50.0;             // start TSL at x% from TP
+   
 input group "/--- Risk & Order Management Inputs ---/"
    
    input RiskType RiskMode = systemRisk;                             // Risk calculation mode
@@ -87,7 +156,7 @@ input group "/--- Risk & Order Management Inputs ---/"
 #define FIXED_RISK_PERCENT 1.0   // Fixed risk: 1.0% per trade (hardCodedRisk mode)
 #define MAX_RISK_PERCENT 5.0     // Maximum risk: 5% per trade (safety cap)
 
-input group "/--- Core functions news & trailing configuration ---/" 
+input group "/--- Core functions news ---/" 
 
    input bool                  NewsFilterOn = false;  // Enable news filtering
    input int                   StartTradingMin = 30;  // Minimum minutes to wait after news
@@ -98,22 +167,25 @@ input group "/--- Core functions news & trailing configuration ---/"
    input int                   StopBeforeMin = 30;   // Minutes before news to avoid trading
    ushort sep_code;
 
-input group "/--- Trailing params ---/"  
-   input SLType   SLT = 0;                         // Use Trailing stoploss (TSL)? (No = Fixed Stoploss)
-   input TrType   trailType = 1;                   // If using TSL, what type of TSL? 
-   input int      BarsN = 20;                      // Number of bars to scan for highs and lows
-   input int      HighLowBuffer = 3;               // Buffer from prev low or high to trail (If selected) 
-   input int      trailFixedpips = 10;             // Number of pips to trail SL (If option is selected)
-   input double   TslPercent = 1.0;                // Percentage of ptice to TSL
-   input double   TslPercentTP = 50.0;             // start TSL at x% from TP
-
 input group "/--- Auto-Close Settings ---/"
    input AutoCloseTime AutoClose = Disabled;       // Auto-close all trades
-   input int      CloseHour = 23;                  // Hour to close (0-23, server time)
-   input int      CloseMinute = 55;                // Minute to close (0-59)
+   input TimeHour      CloseHour = H00_12AM;                  // Hour to close (server time)
+   input TimeMinute      CloseMinute = min_0;                // Minute to close 
 
-// Include modular core functions (after all input declarations)
-#include "core_functions.mqh"
+input group "/--- Trading Session Filter (Server Time) ---/"
+   input bool      EnableSessionFilter = false;     // Enable trading session filter
+   input bool      TradeAsianSession = true;        // Trade during Asian session (Tokyo)
+   input TimeHour  AsianStartHour = H00_12AM;       // Asian session start time
+   input TimeHour  AsianEndHour = H09_9AM;          // Asian session end time
+   input bool      TradeLondonSession = true;       // Trade during London session
+   input TimeHour  LondonStartHour = H08_8AM;       // London session start time
+   input TimeHour  LondonEndHour = H17_5PM;         // London session end time
+   input bool      TradeNewYorkSession = true;      // Trade during New York session
+   input TimeHour  NewYorkStartHour = H13_1PM;      // New York session start time
+   input TimeHour  NewYorkEndHour = H22_10PM;       // New York session end time
+   input bool      TradeCustomSession = false;      // Trade during custom time range
+   input TimeHour  CustomStartHour = H00_12AM;      // Custom session start time
+   input TimeHour  CustomEndHour = H23_11PM;        // Custom session end time
 
 //--- Global Variables
 datetime lastBarTime = 0;
@@ -124,6 +196,18 @@ bool firstRun = true;
 int consecutiveLosses = 0;
 double lastTradeProfit = 0.0;
 string newsStatus = ""; // Global news status for chart display
+
+//--- Position tracking for loss prevention
+datetime lastBuyLossTime = 0;
+datetime lastSellLossTime = 0;
+int buyLossCount = 0;
+int sellLossCount = 0;
+
+//--- Allowed trading pairs (models trained on these)
+string allowedPairs[] = {"EURUSD", "GBPUSD", "AUDUSD", "USDJPY", "EUR_USD", "GBP_USD", "AUD_USD", "USD_JPY"};
+
+//--- Maximum positions per chart
+#define MAX_POSITIONS_PER_CHART 2
 
 //--- SMC Context (extracted from response)
 string smcOrderBlocks = "";
@@ -138,9 +222,15 @@ string logFileName = "BlackIce_Trades.csv";
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
 //+------------------------------------------------------------------+
-int OnInit()
-{
+int OnInit(){
 
+   // Initialize license verifier with EA input variables
+   licenseVerifier.Init(LicenseKey, ServerUrl, DebugMode);
+   int res = licenseVerifier.OnInit();
+   if(res != INIT_SUCCEEDED) return res;
+   
+   trade.SetExpertMagicNumber(inpMagic); 
+   
    ChartSetInteger(0, CHART_SHOW_GRID, false); 
    
    Print("========================================");
@@ -159,6 +249,21 @@ int OnInit()
    
    Print("Min Confidence: ", MinConfidence);
    Print("Trading: ", EnableTrading ? "ENABLED" : "DEMO MODE");
+   Print("Max Positions Per Chart: ", MAX_POSITIONS_PER_CHART);
+   Print("========================================");
+   
+   // Check if symbol is allowed
+   if(!IsSymbolAllowed())
+   {
+      Alert("⚠️ WARNING: ", _Symbol, " is NOT in the trained pairs list!");
+      Print("⚠️ Allowed pairs: EURUSD, GBPUSD, AUDUSD, USDJPY");
+      Print("⚠️ Trading will be BLOCKED on this symbol");
+   }
+   else
+   {
+      Print("✅ Symbol ", _Symbol, " is allowed for trading");
+   }
+   
    Print("========================================");
    
    // Check WebRequest permission
@@ -207,6 +312,9 @@ void OnDeinit(const int reason)
 //+------------------------------------------------------------------+
 void OnTick()
 {
+   licenseVerifier.OnTick();
+   if (!licenseVerifier.IsValid()) return;
+   
    // Make prediction on first tick
    if(firstRun)
    {
@@ -309,13 +417,13 @@ void OnTick()
       TrailSL();
    }
    
+   CheckForOpenOrdersandPositions();
+   
    if(shouldUpdate)
    {
       MakePrediction();
    }
 }
-
-//+------------------------------------------------------------------+
 //| Make prediction via REST API                                     |
 //+------------------------------------------------------------------+
 void MakePrediction()
@@ -775,10 +883,85 @@ string ExtractModelPredictions(string response)
 //+------------------------------------------------------------------+
 void ExecuteTrade(int prediction, double confidence)
 {
+   // Check if symbol is allowed for trading
+   if(!IsSymbolAllowed())
+   {
+      Print("⚠️ TRADE BLOCKED: Symbol ", _Symbol, " not in trained pairs list");
+      Print("   Allowed pairs: EURUSD, GBPUSD, AUDUSD, USDJPY");
+      return;
+   }
+   
+   // Check maximum positions per chart
+   if(CountPositionsOnChart() >= MAX_POSITIONS_PER_CHART)
+   {
+      Print("⚠️ TRADE BLOCKED: Maximum ", MAX_POSITIONS_PER_CHART, " positions per chart reached");
+      return;
+   }
+   
+   // Check trading session filter
+   if(!IsWithinTradingSession())
+   {
+      Print("⚠️ TRADE BLOCKED: Outside allowed trading sessions");
+      Print("   Current time: ", TimeToString(TimeCurrent(), TIME_MINUTES));
+      Print("   Active sessions: ", GetCurrentSessionName());
+      return;
+   }
+   
+   // Check daily trade limit (1 BUY + 1 SELL max per day)
+   if(!CanTradeToday(prediction))
+   {
+      Print("⚠️ TRADE BLOCKED: Daily limit reached for ", (prediction == 1 ? "BUY" : "SELL"), " trades");
+      Print("   Limit: 1 BUY + 1 SELL per day | Resets at midnight");
+      return;
+   }
+   
+   // Check if we had a recent loss in this direction
+   if(prediction == 1 && buyLossCount > 0)
+   {
+      Print("⚠️ TRADE BLOCKED: Previous BUY position closed at loss");
+      Print("   BUY trades blocked until loss count reset");
+      return;
+   }
+   
+   if(prediction == -1 && sellLossCount > 0)
+   {
+      Print("⚠️ TRADE BLOCKED: Previous SELL position closed at loss");
+      Print("   SELL trades blocked until loss count reset");
+      return;
+   }
+   
    // Close opposite positions first
    CloseOppositePositions(prediction);
    
-   // Check if we already have a position in this direction
+   // CRITICAL: Double-check for existing positions of same type
+   // This prevents race conditions when EA runs frequently
+   int sameTypeCount = 0;
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      if(PositionSelectByTicket(PositionGetTicket(i)))
+      {
+         if(PositionGetString(POSITION_SYMBOL) == _Symbol && 
+            PositionGetInteger(POSITION_MAGIC) == inpMagic)
+         {
+            ENUM_POSITION_TYPE posType = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+            
+            if((prediction == 1 && posType == POSITION_TYPE_BUY) ||
+               (prediction == -1 && posType == POSITION_TYPE_SELL))
+            {
+               sameTypeCount++;
+            }
+         }
+      }
+   }
+   
+   if(sameTypeCount > 0)
+   {
+      Print("⚠️ DUPLICATE BLOCKED: Already have ", sameTypeCount, " ", 
+            (prediction == 1 ? "BUY" : "SELL"), " position(s) open");
+      return;
+   }
+   
+   // Legacy check (kept for compatibility)
    if(HasPosition(prediction))
    {
       Print("Already have position in this direction");
@@ -859,6 +1042,9 @@ void ExecuteTrade(int prediction, double confidence)
    else
    {
       Print("SUCCESS: Order placed. Ticket: ", result.order);
+      
+      // Increment daily trade counter after successful order
+      IncrementDailyTradeCounter(prediction);
    }
 }
 
@@ -890,10 +1076,34 @@ double CalculateSLDistance()
             {
                double atr = atr_array[0];
                double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
-               slDistance = (atr * ATRMultiplier) / point; // Convert ATR to points
+               
+               // Determine ATR multiplier based on volatility regime
+               double multiplier = ATRMultiplierMedium; // Default
+               
+               if(UseAdaptiveATR)
+               {
+                  // Get volatility regime
+                  string regime = GetVolatilityRegime(atr_handle);
+                  
+                  if(regime == "LOW")
+                     multiplier = ATRMultiplierLow;
+                  else if(regime == "MEDIUM")
+                     multiplier = ATRMultiplierMedium;
+                  else if(regime == "HIGH")
+                     multiplier = ATRMultiplierHigh;
+                  
+                  if(ShowDebugInfo)
+                     PrintFormat("📊 Volatility Regime: %s | Multiplier: %.1fx", regime, multiplier);
+               }
+               else
+               {
+                  multiplier = ATRMultiplierMedium; // Use medium if adaptive disabled
+               }
+               
+               slDistance = (atr * multiplier) / point; // Convert ATR to points
                
                if(ShowDebugInfo)
-                  PrintFormat("📏 ATR SL: ATR=%.5f × %.1f = %.1f points", atr, ATRMultiplier, slDistance);
+                  PrintFormat("📏 ATR SL: ATR=%.5f × %.1fx = %.1f points", atr, multiplier, slDistance);
             }
             else
             {
@@ -939,6 +1149,70 @@ double CalculateSLDistance()
    }
    
    return slDistance;
+}
+
+//+------------------------------------------------------------------+
+//| Determine volatility regime (LOW/MEDIUM/HIGH)                    |
+//+------------------------------------------------------------------+
+string GetVolatilityRegime(int atr_handle)
+{
+   double atr_array[];
+   ArraySetAsSeries(atr_array, true);
+   
+   // Get ATR values for volatility period
+   int copied = CopyBuffer(atr_handle, 0, 0, ATRVolatilityPeriod, atr_array);
+   if(copied < ATRVolatilityPeriod)
+   {
+      if(ShowDebugInfo)
+         Print("⚠️ Insufficient ATR data for volatility regime, using MEDIUM");
+      return "MEDIUM";
+   }
+   
+   // Calculate average ATR over the period
+   double atr_sum = 0.0;
+   for(int i = 0; i < ATRVolatilityPeriod; i++)
+   {
+      atr_sum += atr_array[i];
+   }
+   double atr_avg = atr_sum / ATRVolatilityPeriod;
+   
+   // Current ATR
+   double atr_current = atr_array[0];
+   
+   // Calculate standard deviation of ATR
+   double variance = 0.0;
+   for(int i = 0; i < ATRVolatilityPeriod; i++)
+   {
+      double diff = atr_array[i] - atr_avg;
+      variance += diff * diff;
+   }
+   double std_dev = MathSqrt(variance / ATRVolatilityPeriod);
+   
+   // Determine regime based on current ATR vs average
+   // LOW: Current ATR < Average - 0.5 * StdDev (calm market)
+   // MEDIUM: Within ±0.5 StdDev of average (normal market)
+   // HIGH: Current ATR > Average + 0.5 * StdDev (volatile/trending market)
+   
+   string regime = "MEDIUM";
+   
+   if(atr_current < (atr_avg - 0.5 * std_dev))
+   {
+      regime = "LOW";
+   }
+   else if(atr_current > (atr_avg + 0.5 * std_dev))
+   {
+      regime = "HIGH";
+   }
+   
+   if(ShowDebugInfo)
+   {
+      PrintFormat("📊 ATR Analysis: Current=%.5f | Avg=%.5f | StdDev=%.5f", 
+                  atr_current, atr_avg, std_dev);
+      PrintFormat("   Regime: %s (%.1f%% of average)", 
+                  regime, (atr_current / atr_avg) * 100);
+   }
+   
+   return regime;
 }
 
 //+------------------------------------------------------------------+
@@ -1137,6 +1411,8 @@ double CalculateLotsWithRisk(double slPoints, double riskPercent)
 //+------------------------------------------------------------------+
 bool HasPosition(int prediction)
 {
+   int count = 0;
+   
    for(int i = PositionsTotal() - 1; i >= 0; i--)
    {
       if(PositionSelectByTicket(PositionGetTicket(i)))
@@ -1146,14 +1422,23 @@ bool HasPosition(int prediction)
          {
             ENUM_POSITION_TYPE posType = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
             
-            // FIXED: Correct mapping (server sends 1=BUY, -1=SELL, 0=HOLD)
+            // Count positions of the requested type
             if(prediction == 1 && posType == POSITION_TYPE_BUY)
-               return true;
-            if(prediction == -1 && posType == POSITION_TYPE_SELL)
-               return true;
+               count++;
+            else if(prediction == -1 && posType == POSITION_TYPE_SELL)
+               count++;
          }
       }
    }
+   
+   // Return true if we have ANY position of this type (prevents duplicates)
+   if(count > 0)
+   {
+      if(ShowDebugInfo)
+         Print("⚠️ Already have ", count, " ", (prediction == 1 ? "BUY" : "SELL"), " position(s) - blocking duplicate");
+      return true;
+   }
+   
    return false;
 }
 
@@ -1470,9 +1755,9 @@ void DisplayPredictionInfo(string predLabel, double confidence, double prob_sell
    comment += "\n";
    
    // System info
-   comment += "📊 Analysis: Single Timeframe (M5)\n";
-   comment += "📈 Candles: 250 bars for feature engineering\n";
-   comment += "🔧 Features: 58 (55 Technical + 3 Macro)\n";
+   comment += "📊 Analysis: Multiple Timeframes (M5, H1, H4)\n";
+   comment += "📈 Candles: 250+ bars for feature engineering\n";
+   comment += "🔧 Features: 81 \n";
    comment += "🌐 Server: " + RestServerURL + "\n";
    comment += "\n";
    comment += "💡 Note: Regime and Multi-Timeframe Analysis active\n";
@@ -1601,6 +1886,32 @@ void DisplayPredictionInfo(string predLabel, double confidence, double prob_sell
    comment += "📈 Min Confidence: " + DoubleToString(MinConfidence * 100, 0) + "%\n";
    comment += "\n";
    
+   // Session filter status
+   if(EnableSessionFilter)
+   {
+      MqlDateTime dt;
+      TimeToStruct(TimeCurrent(), dt);
+      string currentSession = GetCurrentSessionName();
+      bool canTrade = IsWithinTradingSession();
+      
+      if(canTrade)
+         comment += "🕐 Session: " + currentSession + " ✅\n";
+      else
+         comment += "🕐 Session: " + currentSession + " ⛔\n";
+      
+      comment += "   Enabled: ";
+      if(TradeAsianSession) comment += "Asian ";
+      if(TradeLondonSession) comment += "London ";
+      if(TradeNewYorkSession) comment += "NY ";
+      if(TradeCustomSession) comment += "Custom ";
+      comment += "\n";
+   }
+   else
+   {
+      comment += "🕐 Session Filter: Disabled (24/7)\n";
+   }
+   comment += "\n";
+   
    // News filter status
    if(NewsFilterOn)
    {
@@ -1618,6 +1929,53 @@ void DisplayPredictionInfo(string predLabel, double confidence, double prob_sell
    if(EnableCompensatory && consecutiveLosses > 0)
    {
       comment += "⚠️ Recovery Mode: " + IntegerToString(consecutiveLosses) + " losses\n";
+   }
+   
+   comment += "\n";
+   comment += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n";
+   comment += "POSITION MANAGEMENT:\n";
+   comment += "\n";
+   
+   // Position count
+   int posCount = CountPositionsOnChart();
+   comment += "📊 Positions: " + IntegerToString(posCount) + " / " + IntegerToString(MAX_POSITIONS_PER_CHART) + " (max)\n";
+   
+   // Daily trade limits
+   comment += "📅 Today's Trades:\n";
+   comment += "   🟢 BUY:  " + IntegerToString(buyTradesToday) + " / 1\n";
+   comment += "   🔴 SELL: " + IntegerToString(sellTradesToday) + " / 1\n";
+   comment += "   (Resets daily at midnight)\n";
+   
+   // Symbol check
+   if(!IsSymbolAllowed())
+   {
+      comment += "⛔ Symbol: NOT ALLOWED (not in trained pairs)\n";
+      comment += "   Allowed: EURUSD, GBPUSD, AUDUSD, USDJPY\n";
+   }
+   else
+   {
+      comment += "✅ Symbol: ALLOWED\n";
+   }
+   
+   // Loss counter status
+   if(buyLossCount > 0)
+   {
+      comment += "🔴 BUY: BLOCKED (loss count: " + IntegerToString(buyLossCount) + ")\n";
+      comment += "   Last loss: " + TimeToString(lastBuyLossTime, TIME_DATE|TIME_MINUTES) + "\n";
+   }
+   else
+   {
+      comment += "🟢 BUY: ENABLED\n";
+   }
+   
+   if(sellLossCount > 0)
+   {
+      comment += "🔴 SELL: BLOCKED (loss count: " + IntegerToString(sellLossCount) + ")\n";
+      comment += "   Last loss: " + TimeToString(lastSellLossTime, TIME_DATE|TIME_MINUTES) + "\n";
+   }
+   else
+   {
+      comment += "🟢 SELL: ENABLED\n";
    }
    
    comment += "\n";
@@ -2025,6 +2383,145 @@ void OnTradeClosed(ulong ticket, double profit)
 }
 
 //+------------------------------------------------------------------+
+//| Check if current symbol is in allowed trading pairs              |
+//+------------------------------------------------------------------+
+bool IsSymbolAllowed()
+{
+   string currentSymbol = _Symbol;
+   
+   // Remove common suffixes (.ecn, .raw, .pro, etc.)
+   StringReplace(currentSymbol, ".ecn", "");
+   StringReplace(currentSymbol, ".raw", "");
+   StringReplace(currentSymbol, ".pro", "");
+   StringReplace(currentSymbol, ".m", "");
+   StringReplace(currentSymbol, ".", "");
+   
+   // Convert to uppercase for comparison
+   StringToUpper(currentSymbol);
+   
+   // Check against allowed pairs
+   for(int i = 0; i < ArraySize(allowedPairs); i++)
+   {
+      string allowedPair = allowedPairs[i];
+      StringToUpper(allowedPair);
+      
+      if(StringFind(currentSymbol, allowedPair) >= 0 || StringFind(allowedPair, currentSymbol) >= 0)
+      {
+         if(ShowDebugInfo)
+            Print("✅ Symbol ", _Symbol, " matched with allowed pair: ", allowedPairs[i]);
+         return true;
+      }
+   }
+   
+   return false;
+}
+
+//+------------------------------------------------------------------+
+//| Count positions on current chart                                 |
+//+------------------------------------------------------------------+
+int CountPositionsOnChart()
+{
+   int count = 0;
+   
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      if(PositionSelectByTicket(PositionGetTicket(i)))
+      {
+         if(PositionGetString(POSITION_SYMBOL) == _Symbol && 
+            PositionGetInteger(POSITION_MAGIC) == inpMagic)
+         {
+            count++;
+         }
+      }
+   }
+   
+   return count;
+}
+
+//+------------------------------------------------------------------+
+//| Track position outcomes and update loss counters                 |
+//+------------------------------------------------------------------+
+void OnTradeTransaction(const MqlTradeTransaction& trans,
+                        const MqlTradeRequest& request,
+                        const MqlTradeResult& result)
+{
+   // Only process deal transactions
+   if(trans.type != TRADE_TRANSACTION_DEAL_ADD)
+      return;
+   
+   // Get deal properties
+   ulong dealTicket = trans.deal;
+   if(dealTicket == 0)
+      return;
+   
+   if(!HistoryDealSelect(dealTicket))
+      return;
+   
+   // Check if this is our EA's deal
+   if(HistoryDealGetInteger(dealTicket, DEAL_MAGIC) != inpMagic)
+      return;
+   
+   // Check if this is our symbol
+   if(HistoryDealGetString(dealTicket, DEAL_SYMBOL) != _Symbol)
+      return;
+   
+   // Check if this is an exit (closing) deal
+   ENUM_DEAL_ENTRY dealEntry = (ENUM_DEAL_ENTRY)HistoryDealGetInteger(dealTicket, DEAL_ENTRY);
+   if(dealEntry != DEAL_ENTRY_OUT)
+      return;
+   
+   // Get deal profit
+   double profit = HistoryDealGetDouble(dealTicket, DEAL_PROFIT);
+   ENUM_DEAL_TYPE dealType = (ENUM_DEAL_TYPE)HistoryDealGetInteger(dealTicket, DEAL_TYPE);
+   
+   // Update loss counters based on deal type and profit
+   if(profit < 0)
+   {
+      if(dealType == DEAL_TYPE_BUY)
+      {
+         // Closed a BUY position at loss
+         buyLossCount++;
+         lastBuyLossTime = TimeCurrent();
+         Print("❌ BUY position closed at LOSS: $", DoubleToString(profit, 2));
+         Print("   BUY trades now BLOCKED (loss count: ", buyLossCount, ")");
+      }
+      else if(dealType == DEAL_TYPE_SELL)
+      {
+         // Closed a SELL position at loss
+         sellLossCount++;
+         lastSellLossTime = TimeCurrent();
+         Print("❌ SELL position closed at LOSS: $", DoubleToString(profit, 2));
+         Print("   SELL trades now BLOCKED (loss count: ", sellLossCount, ")");
+      }
+   }
+   else if(profit > 0)
+   {
+      // Winning trade - reset loss counter for that direction
+      if(dealType == DEAL_TYPE_BUY)
+      {
+         if(buyLossCount > 0)
+         {
+            Print("✅ BUY position closed at PROFIT: $", DoubleToString(profit, 2));
+            Print("   BUY loss counter RESET (was: ", buyLossCount, ")");
+            buyLossCount = 0;
+         }
+      }
+      else if(dealType == DEAL_TYPE_SELL)
+      {
+         if(sellLossCount > 0)
+         {
+            Print("✅ SELL position closed at PROFIT: $", DoubleToString(profit, 2));
+            Print("   SELL loss counter RESET (was: ", sellLossCount, ")");
+            sellLossCount = 0;
+         }
+      }
+   }
+   
+   // Call existing OnTradeClosed for other tracking
+   OnTradeClosed(trans.position, profit);
+}
+/*
+//+------------------------------------------------------------------+
 //| Draw Order Block zones on chart                                  |
 //+------------------------------------------------------------------+
 void DrawOrderBlockZones(string response)
@@ -2195,4 +2692,4 @@ void DrawOrderBlockZones(string response)
 
 
 //+------------------------------------------------------------------+
-
+*/

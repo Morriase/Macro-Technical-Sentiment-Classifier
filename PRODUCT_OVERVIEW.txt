@@ -1,0 +1,60 @@
+
+
+
+Hello, traders! Meet Auron AI—the next-level trading intelligence designed to supercharge your Forex results and put you in control of every market move. Whether you’re a seasoned pro or just starting out, Auron AI is your secret weapon for smarter, faster, and more confident trading.
+
+Why Auron AI?
+-------------
+
+• Trade with confidence: Get instant, high-precision BUY, SELL, or HOLD signals—no more second-guessing your trades.
+• Stay ahead of the market: Real-time analysis of technicals, macro events, and (optionally) live sentiment means you’re always one step ahead.
+• Maximize your profits: Dynamic position sizing and quality scoring help you squeeze the most out of every opportunity.
+• Plug-and-play simplicity: Easy setup, seamless integration with MetaTrader, and zero fuss. Just connect and go!
+• 24/7 reliability: Auron AI never sleeps—so you never miss a trade.
+
+Key Features at a Glance
+------------------------
+
+| Feature                                 | Auron AI                        | Old-School Models          |
+|------------------------------------------|:-------------------------------:|:-------------------------:|
+| Multi-Timeframe Technical Analysis       |                ✓                |            ✗              |
+| Macroeconomic Event Integration         |                ✓                |            ✗              |
+| Live Sentiment Analysis (Optional)      |                ✓                |            ✗              |
+| Model Schema Validation                 |                ✓                |            ✗              |
+| Real-Time, High-Confidence Signals      |                ✓                |            ~              |
+| Fuzzy Logic Quality Scoring             |                ✓                |            ✗              |
+| Position Sizing Recommendations         |                ✓                |            ✗              |
+| Plug-and-Play API Server                |                ✓                |            ✗              |
+| Transparent Quality Metrics              |                ✓                |            ✗              |
+| Extensible to New Assets                 |                ✓                |            ~              |
+
+Legend: ✓ = Fully Supported, ~ = Partially Supported, ✗ = Not Supported
+
+How to Get Started
+------------------
+1. Connect Auron AI to your MetaTrader or trading platform.
+2. Feed in your OHLCV and macro event data.
+3. Set your risk preferences and let Auron AI handle the rest.
+4. Watch as Auron AI delivers actionable signals and quality scores—so you can trade with total clarity.
+
+
+Supported Pairs
+---------------
+Auron AI currently supports the following major Forex pairs:
+- EURUSD
+- GBPUSD
+- USDJPY
+- AUDUSD
+
+Support for additional pairs is coming soon in future upgrades!
+
+Minimum Requirements & Recommendations
+--------------------------------------
+- Recommended brokers: Any with ECN/RAW/LOW spread type
+- Minimum initial deposit: $500 (1:500 leverage recommended)
+- Account type: Hedging
+- Use a VPS for 24/7 operation (strongly recommended)
+
+Ready to take your trading to the next level? Join the Auron AI community and experience the power of true trading intelligence. Attach Auron AI to your chart, set your preferences, and let’s start winning together!
+
+For setup instructions or questions, send a private message after purchase.
