@@ -3,10 +3,9 @@ title: Macro-Technical Sentiment Forex Classifier
 emoji: 📈
 colorFrom: blue
 colorTo: green
-sdk: gradio
-sdk_version: "4.0.0"
-app_file: app.py
+sdk: docker
 pinned: false
+license: mit
 ---
 
 # Macro-Technical Sentiment Forex Classifier
