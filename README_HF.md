@@ -1,13 +1,3 @@
----
-title: Forex Inference Server
-emoji: 📈
-colorFrom: blue
-colorTo: green
-sdk: docker
-pinned: false
-license: mit
----
-
 # Forex AI Trading Inference Server
 
 Real-time forex trading predictions using hybrid ML models (XGBoost + LSTM).
