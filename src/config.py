@@ -41,9 +41,10 @@ FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY", "")
 TRADING_ECONOMICS_API_KEY = os.getenv("TRADING_ECONOMICS_API_KEY", "")
 
 # Currency Pairs Configuration
-CURRENCY_PAIRS = ["USD_CAD", "NZD_USD"]
+CURRENCY_PAIRS = ["EUR_USD", "GBP_USD", "USD_JPY",
+                  "AUD_USD", "XAU_USD", "USD_CAD", "USD_CHF", "NZD_USD"]
 
-PRIMARY_PAIR = "NZD_USD"  # Primary pair for training and evaluation
+PRIMARY_PAIR = "EUR_USD"  # Primary pair for training and evaluation
 
 # Data Acquisition Settings
 FX_DATA_GRANULARITY = "M5"  # 5-minute candles for high-fidelity
