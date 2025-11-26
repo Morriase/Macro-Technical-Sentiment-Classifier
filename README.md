@@ -1,13 +1,3 @@
----
-title: Macro-Technical Sentiment Forex Classifier
-emoji: 📈
-colorFrom: blue
-colorTo: green
-sdk: docker
-pinned: false
-license: mit
----
-
 # Macro-Technical Sentiment Forex Classifier
 
 A production-ready ML-based forex trading system with hybrid ensemble architecture, live inference server, and MetaTrader 5 integration. Predicts directional movements (Buy/Sell/Hold) in major currency pairs using technical indicators and macroeconomic calendar events.

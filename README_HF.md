@@ -14,7 +14,7 @@ Real-time forex trading predictions using hybrid ML models (XGBoost + LSTM).
 
 ## Features
 
-- **4 Currency Pairs**: EUR/USD, GBP/USD, USD/JPY, AUD/USD
+- **6 Currency Pairs**: EUR/USD, GBP/USD, USD/JPY, AUD/USD, XAU/USD, USD/CHF
 - **81 Features**: Technical indicators + Multi-timeframe analysis + Macro events
 - **Hybrid Models**: XGBoost + LSTM ensemble with meta-classifier
 - **Quality Scoring**: Fuzzy logic-based signal quality assessment
