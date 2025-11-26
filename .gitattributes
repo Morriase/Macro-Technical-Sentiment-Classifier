@@ -1,4 +1,8 @@
 models/*.pkl filter=lfs diff=lfs merge=lfs -text
 models/*.pth filter=lfs diff=lfs merge=lfs -text
 models/* filter=lfs diff=lfs merge=lfs -text
+models/USD_JPY_model_xgb_base.pkl filter=lfs diff=lfs merge=lfs -text
+*.pkl filter=lfs diff=lfs merge=lfs -text
+*.pth filter=lfs diff=lfs merge=lfs -text
+*.json filter=lfs diff=lfs merge=lfs -text
 models/*.json filter=lfs diff=lfs merge=lfs -text
