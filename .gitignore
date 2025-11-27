@@ -51,6 +51,10 @@ data/
 *.h5
 *.hdf5
 *.pkl
+# Allow model artifacts in models/ to be tracked
+!models/*.pkl
+!models/*.pth
+!models/*.json
 *.pickle
 
 # Model weight files (allow Python source code in src/models/)
