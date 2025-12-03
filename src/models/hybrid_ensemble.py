@@ -68,7 +68,7 @@ class HybridEnsemble:
             # Use GPU for training (10-100x faster!)
             "tree_method": "gpu_hist",
             "device": "cuda",  # Explicitly use CUDA
-            "n_jobs": -1,
+            "n_jobs": 1,  # Must be 1 when using GPU
         }
 
         self.xgb_base = xgb.XGBClassifier(**self.xgb_params)
@@ -103,7 +103,7 @@ class HybridEnsemble:
             "random_state": random_state,
             "tree_method": "gpu_hist",  # Use GPU for training
             "device": "cuda",  # Explicitly use CUDA
-            "n_jobs": -1,
+            "n_jobs": 1,  # Must be 1 when using GPU
         }
 
         self.meta_classifier = xgb.XGBClassifier(**self.meta_xgb_params)

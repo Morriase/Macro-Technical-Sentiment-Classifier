@@ -198,6 +198,10 @@ class WalkForwardOptimizer:
             "reg_alpha": trial.suggest_float("reg_alpha", 0.0, 0.1),
             "reg_lambda": trial.suggest_float("reg_lambda", 0.5, 2.0),
             "random_state": self.splitter.min_train_samples,
+            # GPU acceleration
+            "tree_method": "gpu_hist",
+            "device": "cuda",
+            "n_jobs": 1,  # Must be 1 when using GPU
         }
 
         # Train model with suggested parameters
@@ -356,6 +360,10 @@ class WalkForwardOptimizer:
                 "reg_alpha": best_params["reg_alpha"],
                 "reg_lambda": best_params["reg_lambda"],
                 "random_state": self.splitter.min_train_samples,
+                # GPU acceleration
+                "tree_method": "gpu_hist",
+                "device": "cuda",
+                "n_jobs": 1,
             }
             model = self.model_class(xgb_params=xgb_params)
 
