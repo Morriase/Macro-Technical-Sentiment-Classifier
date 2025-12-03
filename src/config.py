@@ -129,7 +129,7 @@ ENSEMBLE_CONFIG = {
             "num_layers": 2,
             "dropout": 0.5,
             "learning_rate": 0.00025,
-            "batch_size": 256,
+            "batch_size": 128,
             "epochs": 100,
             "early_stopping_patience": 10,
             # Regularization (L2 only for now - simpler and effective)
@@ -171,7 +171,7 @@ OPTUNA_CONFIG = {
     # Reduced from 8 for faster training (each trial takes ~45min)
     "n_trials": 5,
     "timeout": 3600,  # 1 hour
-    "n_jobs": -1,
+    "n_jobs": 1,
     "optimization_metric": "profit_factor",  # or "sharpe_ratio"
 }
 
@@ -235,7 +235,7 @@ CUDA_DEVICE_COUNT = torch.cuda.device_count() if USE_CUDA else 0
 GPU_CONFIG = {
     "device": DEVICE,
     "use_cuda": USE_CUDA,
-    "num_workers": 4 if IS_KAGGLE else 2,  # DataLoader workers
+    "num_workers": 0,  # DataLoader workers (0 to save RAM)
     "pin_memory": USE_CUDA,  # Pin memory for faster GPU transfer
     # Use AMP (Automatic Mixed Precision) for faster training
     "mixed_precision": USE_CUDA,
