@@ -173,10 +173,10 @@ WFO_CONFIG = {
 
 # Hyperparameter Optimization
 OPTUNA_CONFIG = {
-    # Reduced from 8 for faster training (each trial takes ~45min)
-    "n_trials": 5,
+    # Reduced for Kaggle memory constraints (Tesla T4 = 16GB)
+    "n_trials": 3,  # Reduced from 5 to save memory
     "timeout": 3600,  # 1 hour
-    "n_jobs": -1,
+    "n_jobs": 1,  # Sequential to avoid OOM (was -1 = parallel)
     "optimization_metric": "profit_factor",  # or "sharpe_ratio"
 }
 

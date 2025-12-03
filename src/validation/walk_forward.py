@@ -2,6 +2,7 @@
 Walk-Forward Optimization Framework
 Implements time-series aware train/test splits with rolling windows
 """
+import gc
 import numpy as np
 import pandas as pd
 from typing import List, Tuple, Generator, Dict, Optional
@@ -11,6 +12,20 @@ import optuna
 from sklearn.metrics import balanced_accuracy_score, f1_score
 
 from src.config import WFO_CONFIG, OPTUNA_CONFIG, RISK_MANAGEMENT
+
+# Try to import torch for GPU memory management
+try:
+    import torch
+    HAS_TORCH = True
+except ImportError:
+    HAS_TORCH = False
+
+
+def clear_memory():
+    """Clear GPU and CPU memory."""
+    gc.collect()
+    if HAS_TORCH and torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
 
 class WalkForwardSplitter:
@@ -174,7 +189,8 @@ class WalkForwardOptimizer:
             "num_class": 3,
             "learning_rate": trial.suggest_float("learning_rate", 0.001, 0.1, log=True),
             "max_depth": trial.suggest_int("max_depth", 3, 10),
-            "n_estimators": trial.suggest_int("n_estimators", 100, 500),
+            # Reduced for memory
+            "n_estimators": trial.suggest_int("n_estimators", 50, 200),
             "subsample": trial.suggest_float("subsample", 0.6, 1.0),
             "colsample_bytree": trial.suggest_float("colsample_bytree", 0.6, 1.0),
             "min_child_weight": trial.suggest_int("min_child_weight", 1, 7),
@@ -303,6 +319,9 @@ class WalkForwardOptimizer:
             logger.info(f"\n{'='*60}")
             logger.info(f"Walk-Forward Fold {fold_idx + 1}")
             logger.info(f"{'='*60}")
+
+            # Clear memory before each fold
+            clear_memory()
 
             # Extract data
             X_train = df.loc[train_idx, feature_columns].values

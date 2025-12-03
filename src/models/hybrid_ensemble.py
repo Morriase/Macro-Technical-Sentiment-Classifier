@@ -65,7 +65,8 @@ class HybridEnsemble:
             "scale_pos_weight": 1.0,
             "eval_metric": "mlogloss",
             "random_state": random_state,
-            "tree_method": "gpu_hist",  # Use GPU for training (10-100x faster!)
+            # Use GPU for training (10-100x faster!)
+            "tree_method": "gpu_hist",
             "device": "cuda",  # Explicitly use CUDA
             "n_jobs": -1,
         }
@@ -75,13 +76,13 @@ class HybridEnsemble:
         # Base Learner 2: LSTM for sequence modeling
         self.lstm_params = lstm_params or {
             "sequence_length": 22,  # ~1 month of trading days
-            "hidden_size": 128,
+            "hidden_size": 64,  # Reduced from 128 to save GPU memory
             "num_layers": 2,
             "num_classes": 3,
             "dropout": 0.3,
             "learning_rate": 0.001,
-            "batch_size": 64,
-            "epochs": 100,
+            "batch_size": 32,  # Reduced from 64 to save memory
+            "epochs": 50,  # Reduced from 100 (early stopping will kick in)
             "early_stopping_patience": 10,
         }
 
