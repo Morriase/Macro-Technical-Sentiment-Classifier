@@ -61,8 +61,15 @@ class WalkForwardSplitter:
         min_date = dates.min()
         max_date = dates.max()
 
+        logger.info(f"Walk-Forward Split: data from {min_date} to {max_date}")
+        logger.info(
+            f"  train_window={self.train_window_months}mo, test_window={self.test_window_months}mo, step={self.step_months}mo")
+        logger.info(
+            f"  min_train_samples={self.min_train_samples}, total samples={len(df)}")
+
         # Initial train window end
         train_end = min_date + pd.DateOffset(months=self.train_window_months)
+        logger.info(f"  Initial train_end: {train_end}")
 
         split_count = 0
 
@@ -72,7 +79,12 @@ class WalkForwardSplitter:
             test_end = test_start + \
                 pd.DateOffset(months=self.test_window_months)
 
+            logger.debug(
+                f"  Checking fold: train_end={train_end}, test_end={test_end}, max_date={max_date}")
+
             if test_end > max_date:
+                logger.info(
+                    f"  Breaking: test_end ({test_end}) > max_date ({max_date})")
                 break
 
             # Train indices
