@@ -118,14 +118,14 @@ class ForexClassifierPipeline:
         # Initialize feature engineers (common to both modes)
         self.tech_engineer = TechnicalFeatureEngineer()
 
-        # Sentiment analyzer is optional - if it fails to load, we continue without it
-        try:
-            self.sentiment_analyzer = SentimentAnalyzer()
-            logger.success("✓ Sentiment features enabled")
-        except Exception as e:
-            self.sentiment_analyzer = None
-            logger.warning(f"⚠ Sentiment features disabled: {e}")
-            logger.warning("Proceeding with technical + MTF features only")
+        # Sentiment analyzer - DISABLED for training when historical news doesn't match FX dates
+        # FinBERT will be used at inference time with live Marketaux data
+        # This avoids train-inference mismatch (old news 2015-2020 vs new FX 2024-2025)
+        self.sentiment_analyzer = None
+        logger.info(
+            "ℹ Sentiment features disabled for training (no matching historical news)")
+        logger.info(
+            "  → FinBERT + Marketaux will provide live sentiment during inference")
 
         # Initialize data storage
         self.df_price = None
@@ -177,15 +177,12 @@ class ForexClassifierPipeline:
             if self.df_events is not None and not self.df_events.empty:
                 logger.success(f"✓ Loaded {len(self.df_events)} macro events")
 
-            try:
-                self.df_news = self.kaggle_news_loader.load_historical_news(
-                    start_date=start_date, end_date=end_date)
-                if self.df_news is not None and not self.df_news.empty:
-                    logger.success(
-                        f"✓ Loaded {len(self.df_news)} news articles")
-            except Exception as e:
-                logger.warning(f"⚠ Failed to load news data: {e}")
-                self.df_news = None
+            # Skip loading news - sentiment disabled for training
+            # Historical news (2015-2020) doesn't match FX data (2024-2025)
+            # FinBERT + Marketaux will handle live sentiment at inference
+            self.df_news = None
+            logger.info(
+                "ℹ Skipping news load (sentiment handled by FinBERT at inference)")
 
         else:
             # Local data fetching from OANDA (assuming H4 is the primary analysis timeframe)

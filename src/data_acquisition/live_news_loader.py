@@ -8,10 +8,10 @@ Uses the free tier of Marketaux API which includes:
 - Entity-based sentiment scoring
 - Forex-related filtering
 
-The live sentiment is designed to match training data format:
-- Same VADER scoring as Kaggle historical data
-- Same aggregation methods (EMA periods)
-- Same forex keyword filtering
+The live sentiment uses FinBERT for financial-domain sentiment analysis:
+- FinBERT is fine-tuned on financial text (better than generic VADER)
+- Properly handles financial terms like "bull", "bear", "rise", "fall"
+- Produces: positive, negative, neutral probabilities + polarity
 """
 import os
 import requests
@@ -33,6 +33,50 @@ except ImportError:
     SENTIMENT_CACHE_MINUTES = 5
     CURRENCY_PAIRS = ["EUR_USD", "GBP_USD", "USD_JPY",
                       "AUD_USD", "USD_CAD", "USD_CHF", "NZD_USD"]
+
+# FinBERT model for financial sentiment analysis
+FINBERT_MODEL = None
+FINBERT_TOKENIZER = None
+
+
+def load_finbert_model():
+    """
+    Load FinBERT model for financial sentiment analysis.
+
+    FinBERT is specifically fine-tuned on financial text and properly handles
+    terms like "bull", "bear", "rise", "fall" in financial context.
+
+    Returns:
+        Tuple of (model, tokenizer) or (None, None) if loading fails
+    """
+    global FINBERT_MODEL, FINBERT_TOKENIZER
+
+    if FINBERT_MODEL is not None:
+        return FINBERT_MODEL, FINBERT_TOKENIZER
+
+    try:
+        from transformers import AutoModelForSequenceClassification, AutoTokenizer
+        import torch
+
+        logger.info("Loading FinBERT model for financial sentiment analysis...")
+
+        model_name = "ProsusAI/finbert"
+        FINBERT_TOKENIZER = AutoTokenizer.from_pretrained(model_name)
+        FINBERT_MODEL = AutoModelForSequenceClassification.from_pretrained(
+            model_name)
+
+        # Move to GPU if available
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        FINBERT_MODEL = FINBERT_MODEL.to(device)
+        FINBERT_MODEL.eval()
+
+        logger.success(f"✓ FinBERT loaded successfully (device: {device})")
+        return FINBERT_MODEL, FINBERT_TOKENIZER
+
+    except Exception as e:
+        logger.error(f"Failed to load FinBERT: {e}")
+        logger.warning("Sentiment analysis will return neutral values")
+        return None, None
 
 
 # Major currency keywords for filtering noise
@@ -459,19 +503,19 @@ class MarketauxNewsLoader:
             logger.debug(f"No articles for {pair} - using neutral sentiment")
             return self._get_neutral_sentiment()
 
-        # Score with VADER
-        return self._score_with_vader(pair_articles)
+        # Score with FinBERT (financial-domain sentiment)
+        return self._score_with_finbert(pair_articles)
 
     def get_sentiment_features(
         self,
         news_df: Optional[pd.DataFrame] = None,
         hours_back: int = 24,
-        use_vader: bool = True
+        use_finbert: bool = True
     ) -> Dict[str, float]:
         """
         Calculate sentiment features from live news for model input.
 
-        This produces features that match the training data format:
+        Uses FinBERT for financial-domain sentiment analysis:
         - polarity: -1 to 1 (positive - negative)
         - positive: 0 to 1 probability
         - negative: 0 to 1 probability
@@ -481,10 +525,10 @@ class MarketauxNewsLoader:
         Args:
             news_df: Pre-fetched news DataFrame, or None to fetch fresh
             hours_back: Hours of news to consider
-            use_vader: Whether to use VADER for local scoring (recommended)
+            use_finbert: Whether to use FinBERT (recommended for financial text)
 
         Returns:
-            Dictionary of sentiment features matching training format
+            Dictionary of sentiment features
         """
         # Fetch news if not provided
         if news_df is None or news_df.empty:
@@ -494,45 +538,68 @@ class MarketauxNewsLoader:
             logger.debug("No news available - returning neutral sentiment")
             return self._get_neutral_sentiment()
 
-        # Score with VADER for consistency with training data
-        if use_vader:
-            sentiments = self._score_with_vader(news_df)
+        # Score with FinBERT for financial-domain accuracy
+        if use_finbert:
+            sentiments = self._score_with_finbert(news_df)
         else:
             # Use Marketaux API sentiment directly
             sentiments = self._use_api_sentiment(news_df)
 
         return sentiments
 
-    def _score_with_vader(self, news_df: pd.DataFrame) -> Dict[str, float]:
+    def _score_with_finbert(self, news_df: pd.DataFrame) -> Dict[str, float]:
         """
-        Score news headlines with VADER to match training pipeline.
+        Score news headlines with FinBERT for financial sentiment analysis.
 
-        This ensures live sentiment uses the same method as training data.
+        FinBERT is fine-tuned on financial text and properly handles terms like
+        "bull", "bear", "rise", "fall" in financial context - much better than
+        generic sentiment analyzers like VADER.
+
+        FinBERT outputs:
+        - positive: probability of positive sentiment
+        - negative: probability of negative sentiment  
+        - neutral: probability of neutral sentiment
         """
         try:
-            from nltk.sentiment import SentimentIntensityAnalyzer
-            import nltk
+            import torch
 
-            # Ensure VADER lexicon is available
-            try:
-                nltk.data.find('sentiment/vader_lexicon.zip')
-            except LookupError:
-                nltk.download('vader_lexicon', quiet=True)
+            model, tokenizer = load_finbert_model()
 
-            analyzer = SentimentIntensityAnalyzer()
+            if model is None or tokenizer is None:
+                logger.warning(
+                    "FinBERT not available - returning neutral sentiment")
+                return self._get_neutral_sentiment()
+
+            device = next(model.parameters()).device
 
             # Score each headline
             scores = []
             for _, row in news_df.iterrows():
                 # Combine headline and snippet for more context
                 text = f"{row['headline']} {row.get('snippet', '')}"
-                vader_scores = analyzer.polarity_scores(text)
+
+                # Tokenize (FinBERT max length is 512)
+                inputs = tokenizer(
+                    text,
+                    return_tensors="pt",
+                    truncation=True,
+                    max_length=512,
+                    padding=True
+                ).to(device)
+
+                # Get predictions
+                with torch.no_grad():
+                    outputs = model(**inputs)
+                    probs = torch.nn.functional.softmax(outputs.logits, dim=-1)
+
+                # FinBERT labels: positive, negative, neutral
+                probs = probs.cpu().numpy()[0]
                 scores.append({
-                    "positive": vader_scores["pos"],
-                    "negative": vader_scores["neg"],
-                    "neutral": vader_scores["neu"],
-                    # VADER compound is -1 to 1
-                    "polarity": vader_scores["compound"]
+                    "positive": float(probs[0]),  # positive
+                    "negative": float(probs[1]),  # negative
+                    "neutral": float(probs[2]),   # neutral
+                    # Polarity: positive - negative (range -1 to 1)
+                    "polarity": float(probs[0] - probs[1])
                 })
 
             if not scores:
@@ -560,7 +627,7 @@ class MarketauxNewsLoader:
             current_sentiment["article_count"] = len(news_df)
 
             logger.info(
-                f"VADER sentiment: polarity={current_sentiment['polarity']:.3f} "
+                f"FinBERT sentiment: polarity={current_sentiment['polarity']:.3f} "
                 f"(pos={current_sentiment['positive']:.3f}, neg={current_sentiment['negative']:.3f}) "
                 f"from {len(news_df)} articles"
             )
@@ -568,7 +635,7 @@ class MarketauxNewsLoader:
             return current_sentiment
 
         except Exception as e:
-            logger.error(f"VADER scoring failed: {e}")
+            logger.error(f"FinBERT scoring failed: {e}")
             return self._get_neutral_sentiment()
 
     def _use_api_sentiment(self, news_df: pd.DataFrame) -> Dict[str, float]:

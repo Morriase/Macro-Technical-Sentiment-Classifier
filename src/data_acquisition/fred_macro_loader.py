@@ -29,11 +29,18 @@ from functools import lru_cache
 
 # Try to import from config
 try:
-    from src.config import DATA_DIR, CURRENCY_PAIRS
+    from src.config import DATA_DIR, CURRENCY_PAIRS, IS_KAGGLE
 except ImportError:
     DATA_DIR = Path("./data")
     CURRENCY_PAIRS = ["EUR_USD", "GBP_USD", "USD_JPY",
                       "AUD_USD", "USD_CAD", "USD_CHF", "NZD_USD"]
+    IS_KAGGLE = False
+
+# Cache directory - use writable location on Kaggle
+if IS_KAGGLE:
+    FRED_CACHE_DIR = Path("/kaggle/working/fred_cache")
+else:
+    FRED_CACHE_DIR = DATA_DIR / "fred_cache"
 
 
 # =============================================================================
@@ -177,10 +184,10 @@ class FREDMacroLoader:
 
         Args:
             api_key: FRED API key. If None, reads from FRED_API_KEY env variable.
-            cache_dir: Directory to cache downloaded data. Defaults to DATA_DIR/fred_cache.
+            cache_dir: Directory to cache downloaded data. Defaults to writable location.
         """
         self.api_key = api_key or os.getenv("FRED_API_KEY", "")
-        self.cache_dir = cache_dir or (DATA_DIR / "fred_cache")
+        self.cache_dir = cache_dir or FRED_CACHE_DIR
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
         # Rate limiting
