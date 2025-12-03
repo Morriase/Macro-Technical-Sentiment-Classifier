@@ -32,8 +32,6 @@ from src.validation.walk_forward import WalkForwardOptimizer
 import warnings
 warnings.filterwarnings('ignore', category=FutureWarning)
 warnings.filterwarnings('ignore', category=RuntimeWarning)
-
-
 # Optional imports for local environment (not needed on Kaggle)
 try:
     from src.data_acquisition.macro_data import MacroDataAcquisition
@@ -43,6 +41,15 @@ except ImportError:
     HAS_API_SOURCES = False
     MacroDataAcquisition = None
     FXDataAcquisition = None
+
+# FRED Macro Loader (real historical macro data)
+try:
+    from src.data_acquisition.fred_macro_loader import FREDMacroLoader, filter_macro_by_currency_pair
+    HAS_FRED = True
+except ImportError:
+    HAS_FRED = False
+    FREDMacroLoader = None
+    filter_macro_by_currency_pair = None
 
 # Add src to path
 sys.path.append(str(Path(__file__).parent))
@@ -229,26 +236,103 @@ class ForexClassifierPipeline:
             logger.warning(
                 "No higher timeframe data available. Skipping MTF feature engineering.")
 
-        # --- Step 2.3: Macro Features ---
-        if self.df_events is not None and not self.df_events.empty and self.macro_data:
+        # --- Step 2.3: FRED Macro Features (REAL historical data) ---
+        # Replace synthetic macro events with actual FRED economic indicators
+        if HAS_FRED and FREDMacroLoader is not None:
+            logger.info(
+                f"Fetching FRED macro features for {self.currency_pair}...")
+            try:
+                # Initialize FRED loader
+                fred_loader = FREDMacroLoader()
+
+                # Get date range from price data
+                start_date = self.df_features.index.min()
+                end_date = self.df_features.index.max()
+
+                if isinstance(start_date, pd.Timestamp):
+                    start_date = start_date.to_pydatetime()
+                    end_date = end_date.to_pydatetime()
+
+                # Fetch PAIR-SPECIFIC FRED macro features
+                # (rate differentials, economic indicators for base/quote currencies)
+                fred_macro_df = fred_loader.get_macro_features_for_pair(
+                    self.currency_pair, start_date, end_date
+                )
+
+                if not fred_macro_df.empty:
+                    # Merge FRED features with price features
+                    self.df_features = self.df_features.reset_index()
+
+                    # Ensure date column compatibility
+                    self.df_features['date'] = pd.to_datetime(
+                        self.df_features['date']).dt.date
+                    fred_macro_df['date'] = pd.to_datetime(
+                        fred_macro_df['date']).dt.date
+
+                    self.df_features = pd.merge(
+                        self.df_features,
+                        fred_macro_df,
+                        on='date',
+                        how='left'
+                    )
+
+                    # Forward-fill macro features (they don't change daily)
+                    macro_cols = [
+                        col for col in fred_macro_df.columns if col != 'date']
+                    for col in macro_cols:
+                        if col in self.df_features.columns:
+                            self.df_features[col] = self.df_features[col].ffill().fillna(
+                                0)
+
+                    self.df_features['date'] = pd.to_datetime(
+                        self.df_features['date'])
+                    self.df_features = self.df_features.set_index('date')
+
+                    logger.success(
+                        f"✓ Added {len(macro_cols)} FRED macro features for {self.currency_pair}")
+                else:
+                    logger.warning(
+                        "No FRED macro data available - adding placeholders")
+                    self.df_features["rate_differential"] = 0.0
+                    self.df_features["vix"] = 20.0  # Average VIX
+                    self.df_features["yield_curve"] = 0.0
+            except Exception as e:
+                logger.warning(f"⚠ Failed to fetch FRED macro features: {e}")
+                self.df_features["rate_differential"] = 0.0
+                self.df_features["vix"] = 20.0
+                self.df_features["yield_curve"] = 0.0
+        elif self.df_events is not None and not self.df_events.empty and self.macro_data:
+            # Fallback to old TradingView calendar events if FRED not available
+            logger.info(
+                "FRED not available, using TradingView calendar events...")
             self.df_features = self.macro_data.calculate_temporal_proximity(
                 events_df=self.df_events,
                 price_df=self.df_features,
             )
         else:
             # Add placeholder columns if no macro data
-            self.df_features["tau_pre"] = 0.0
-            self.df_features["tau_post"] = 0.0
-            self.df_features["weighted_surprise"] = 0.0
+            logger.warning(
+                "No macro data sources available - using placeholders")
+            self.df_features["rate_differential"] = 0.0
+            self.df_features["vix"] = 20.0
+            self.df_features["yield_curve"] = 0.0
 
         # --- Step 2.4: Sentiment Features ---
         if (self.sentiment_analyzer is not None and
                 self.sentiment_analyzer.sentiment_pipeline is not None and
                 self.df_news is not None and not self.df_news.empty):
-            logger.info("Calculating sentiment features...")
+            logger.info(
+                f"Calculating PAIR-SPECIFIC sentiment features for {self.currency_pair}...")
             try:
+                # CRITICAL FIX: Pass currency_pair to filter headlines
+                # This ensures training sentiment matches inference sentiment
+                # Previously: all 121K headlines → diluted signal
+                # Now: ~15K pair-relevant headlines → focused signal
                 daily_sentiment = self.sentiment_analyzer.aggregate_daily_sentiment(
-                    self.df_news)
+                    self.df_news,
+                    text_col='text',  # news_loader standardizes to 'text' column
+                    currency_pair=self.currency_pair  # Filter to pair-specific headlines
+                )
                 time_weighted_sentiment = self.sentiment_analyzer.calculate_time_weighted_sentiment(
                     daily_sentiment)
 
@@ -327,31 +411,40 @@ class ForexClassifierPipeline:
             # ATR-based adaptive threshold
             atr_col = "atr_14"  # ATR with 14-period (from config)
             if atr_col not in self.df_features.columns:
-                raise ValueError(f"ATR column '{atr_col}' not found in features. Cannot use ATR-based threshold.")
-            
+                raise ValueError(
+                    f"ATR column '{atr_col}' not found in features. Cannot use ATR-based threshold.")
+
             # Convert ATR to pips and apply multiplier
-            threshold_series = (self.df_features[atr_col] * pip_multiplier * atr_multiplier)
+            threshold_series = (
+                self.df_features[atr_col] * pip_multiplier * atr_multiplier)
             logger.info(f"Using ATR-based threshold: {atr_multiplier}x ATR")
-            logger.info(f"ATR threshold range: {threshold_series.min():.2f} to {threshold_series.max():.2f} pips")
-            logger.info(f"Mean ATR threshold: {threshold_series.mean():.2f} pips")
-            
+            logger.info(
+                f"ATR threshold range: {threshold_series.min():.2f} to {threshold_series.max():.2f} pips")
+            logger.info(
+                f"Mean ATR threshold: {threshold_series.mean():.2f} pips")
+
             # Create conditions with dynamic threshold
             conditions = [
-                self.df_features["forward_return_pips"] > threshold_series,   # Buy
-                self.df_features["forward_return_pips"] < -threshold_series,  # Sell
+                # Buy
+                self.df_features["forward_return_pips"] > threshold_series,
+                self.df_features["forward_return_pips"] < -
+                threshold_series,  # Sell
             ]
             choices = [1, -1]
-            self.df_features["target"] = np.select(conditions, choices, default=0)
-            
+            self.df_features["target"] = np.select(
+                conditions, choices, default=0)
+
             # Map to 0, 1, 2 for sklearn
             target_map = {-1: 1, 0: 2, 1: 0}  # Sell=1, Hold=2, Buy=0
-            self.df_features["target_class"] = self.df_features["target"].map(target_map)
-            
+            self.df_features["target_class"] = self.df_features["target"].map(
+                target_map)
+
             # Drop future data
             self.df_features.dropna(subset=["forward_close"], inplace=True)
-            
+
             # Class distribution
-            class_counts = self.df_features["target_class"].value_counts().sort_index()
+            class_counts = self.df_features["target_class"].value_counts(
+            ).sort_index()
             logger.info("Target class distribution (ATR-based):")
             for cls, count in class_counts.items():
                 class_name = ["Buy", "Sell", "Hold"][cls]
@@ -531,46 +624,49 @@ class ForexClassifierPipeline:
         if use_fuzzy_quality:
             from src.models.signal_quality import SignalQualityScorer
             quality_scorer = SignalQualityScorer()
-            
+
             # Calculate quality scores for each prediction
             quality_scores = []
             quality_components = []
             position_sizes = []
-            
+
             for idx, (_, row) in enumerate(results.iterrows()):
                 # Get features for this prediction
                 feature_row = features_recent.iloc[idx]
-                
+
                 # Calculate quality score
                 quality, components = quality_scorer.calculate_quality(
                     prediction_proba=y_pred_proba[idx],
                     features=feature_row,
                     predicted_class=y_pred[idx]
                 )
-                
+
                 quality_scores.append(quality)
                 quality_components.append(components)
-                
+
                 # Get position size multiplier
                 position_sizes.append(
                     quality_scorer.get_position_size_multiplier(quality)
                 )
-            
+
             results["quality_score"] = quality_scores
             results["position_size_pct"] = position_sizes
-            
+
             # Add component scores
-            results["quality_confidence"] = [c['confidence'] for c in quality_components]
+            results["quality_confidence"] = [c['confidence']
+                                             for c in quality_components]
             results["quality_trend"] = [c['trend'] for c in quality_components]
-            results["quality_volatility"] = [c['volatility'] for c in quality_components]
-            results["quality_momentum"] = [c['momentum'] for c in quality_components]
+            results["quality_volatility"] = [c['volatility']
+                                             for c in quality_components]
+            results["quality_momentum"] = [c['momentum']
+                                           for c in quality_components]
 
         # Generate signals with fuzzy quality filtering
         def generate_signal(row):
             # Check quality threshold first (if enabled)
             if use_fuzzy_quality and row["quality_score"] < quality_scorer.min_quality_threshold:
                 return "HOLD"  # Skip low-quality signals
-            
+
             # Then check confidence threshold
             if row["pred_buy_prob"] > confidence_threshold:
                 return "BUY"
@@ -589,24 +685,31 @@ class ForexClassifierPipeline:
         logger.info(f"  Buy Confidence: {latest['pred_buy_prob']:.2%}")
         logger.info(f"  Sell Confidence: {latest['pred_sell_prob']:.2%}")
         logger.info(f"  Hold Confidence: {latest['pred_hold_prob']:.2%}")
-        
+
         if use_fuzzy_quality:
-            logger.info(f"\n  Fuzzy Quality Score: {latest['quality_score']:.1f}/100")
-            logger.info(f"    - Confidence: {latest['quality_confidence']:.1f}/40")
-            logger.info(f"    - Trend Alignment: {latest['quality_trend']:.1f}/25")
-            logger.info(f"    - Volatility Regime: {latest['quality_volatility']:.1f}/20")
-            logger.info(f"    - Momentum Confirm: {latest['quality_momentum']:.1f}/15")
-            logger.info(f"  Position Size: {latest['position_size_pct']*100:.0f}% of base")
-            
+            logger.info(
+                f"\n  Fuzzy Quality Score: {latest['quality_score']:.1f}/100")
+            logger.info(
+                f"    - Confidence: {latest['quality_confidence']:.1f}/40")
+            logger.info(
+                f"    - Trend Alignment: {latest['quality_trend']:.1f}/25")
+            logger.info(
+                f"    - Volatility Regime: {latest['quality_volatility']:.1f}/20")
+            logger.info(
+                f"    - Momentum Confirm: {latest['quality_momentum']:.1f}/15")
+            logger.info(
+                f"  Position Size: {latest['position_size_pct']*100:.0f}% of base")
+
             # Count quality-filtered signals
             total_signals = len(results[results['signal'] != 'HOLD'])
             high_quality = len(results[
-                (results['signal'] != 'HOLD') & 
+                (results['signal'] != 'HOLD') &
                 (results['quality_score'] >= 60)
             ])
             logger.info(f"\n  Signal Quality Summary:")
             logger.info(f"    Total Signals: {total_signals}")
-            logger.info(f"    High Quality (≥60): {high_quality} ({high_quality/max(1,total_signals)*100:.0f}%)")
+            logger.info(
+                f"    High Quality (≥60): {high_quality} ({high_quality/max(1, total_signals)*100:.0f}%)")
 
         # Save predictions
         pred_path = RESULTS_DIR / f"{self.currency_pair}_predictions.csv"
@@ -648,7 +751,8 @@ class ForexClassifierPipeline:
             # Step 3: Create target (ATR-based adaptive threshold)
             from src.config import TARGET_CONFIG
             self.create_target(
-                forward_window_hours=TARGET_CONFIG.get("forward_window_hours", 24),
+                forward_window_hours=TARGET_CONFIG.get(
+                    "forward_window_hours", 24),
                 min_move_pips=TARGET_CONFIG.get("min_move_threshold_pips"),
                 atr_multiplier=TARGET_CONFIG.get("atr_multiplier", 0.5)
             )
@@ -659,8 +763,10 @@ class ForexClassifierPipeline:
             # Step 5: Generate predictions with fuzzy quality scoring
             from src.config import RISK_MANAGEMENT
             predictions = self.generate_predictions(
-                confidence_threshold=RISK_MANAGEMENT.get("base_confidence_threshold", 0.70),
-                use_fuzzy_quality=RISK_MANAGEMENT.get("use_fuzzy_quality", True)
+                confidence_threshold=RISK_MANAGEMENT.get(
+                    "base_confidence_threshold", 0.70),
+                use_fuzzy_quality=RISK_MANAGEMENT.get(
+                    "use_fuzzy_quality", True)
             )
 
             elapsed = datetime.now() - start_time

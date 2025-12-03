@@ -34,6 +34,7 @@ class MacroDataAcquisition:
         start_date: datetime,
         end_date: datetime,
         country: str = "US",
+        min_importance: int = 1,
     ) -> pd.DataFrame:
         """
         Fetch economic calendar events from TradingView (FREE API)
@@ -42,6 +43,7 @@ class MacroDataAcquisition:
             start_date: Start date
             end_date: End date
             country: Country code ('US', 'GB', 'EU', 'JP', 'CH', 'AU', 'CA', 'NZ')
+            min_importance: Minimum importance level (1=low, 2=medium, 3=high)
 
         Returns:
             DataFrame with economic events
@@ -55,8 +57,7 @@ class MacroDataAcquisition:
                 'from': start_date.strftime('%Y-%m-%dT%H:%M:%S.000Z'),
                 'to': end_date.strftime('%Y-%m-%dT%H:%M:%S.000Z'),
                 'countries': country,
-                # High importance only (1=low, 2=medium, 3=high)
-                'minImportance': 3
+                'minImportance': min_importance
             }
 
             response = requests.get(
@@ -79,8 +80,8 @@ class MacroDataAcquisition:
             if df.empty:
                 return df
 
-            # Parse timestamp
-            df['date'] = pd.to_datetime(df['date'], unit='s')
+            # Parse timestamp - TradingView returns ISO format string, not Unix
+            df['date'] = pd.to_datetime(df['date'], errors='coerce')
 
             # Standardize column names
             df = df.rename(columns={
@@ -101,12 +102,13 @@ class MacroDataAcquisition:
                 df['surprise_factor'] = 0
 
             logger.success(
-                f"Fetched {len(df)} high-impact events for {country}")
+                f"✓ Fetched {len(df)} economic events for {country} (importance >= {min_importance})")
 
             return df
 
         except requests.exceptions.RequestException as e:
             logger.error(f"Network error fetching economic calendar: {e}")
+            return pd.DataFrame()
             return pd.DataFrame()
         except Exception as e:
             logger.error(f"Error fetching economic calendar: {e}")

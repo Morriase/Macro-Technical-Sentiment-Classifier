@@ -1,17 +1,18 @@
 //+------------------------------------------------------------------+
 //|                                         BlackIce_REST_EA_V2.mq5  |
 //|                          Optimized for 64% RandomForest Model    |
-//|                          Single Model (RF Only) - Stable & Profitable |
+//|                     Single Model (RF Only) - Stable & Profitable |
 //+------------------------------------------------------------------+
 #property copyright "Auron Automations" 
 #property link "https://www.auronautomations.app"
-#property version   "1.00"
+#property version   "1.30"
 #property description "Auron AI"
 #property strict
 #define PRODUCT_ID "Auron AI"
 
 #include "core_functions.mqh"
 #include <Trade\Trade.mqh>
+
 #include <verification.mqh>
 
 CTrade            trade; 
@@ -32,7 +33,7 @@ enum    StopLossMode    {  atrBased = 0,      // ATR-based (Adaptive to volatili
 enum    TrType          {  Chandelier = 0,   // Use Chandelier Exit
                            Highlow=1,        // Previous low or high 
                            FixedPips=2,      // Defined no of pips 
-                           PctofPrice = 3    // Trail stoploss as % of distance from the TP 
+                           PctofPrice = 3    // Trail stoploss as % o distance from the TP 
                         }; 
                            
 enum    SLType          {  Yes=0,            // Use Trailing stoploss
@@ -95,18 +96,19 @@ enum TimeMinute         {
                           min_45 = 45,
                           min_50 = 50,
                           min_55 = 55, 
-                        };                        
+                        };      
+                                         
 input group "+++ Verify source +++"
    input string ServerUrl = "https://auronautomations.app";   // Server URL (https://auronautomations.app)
 
 input group "++++ LICENCING +++"
 
    input string LicenseKey = "";   // User-provided license key
-   input bool DebugMode = true;  // Enable/disable debug logging
+   input bool DebugMode = true;    // Enable/disable debug logging
 
 input group "/--- Input Parameters ---/"
 
-   input string            RestServerURL =  "https://morriase-forex-live-server.hf.space/predict";   // FAST API URL
+   input string            RestServerURL =  "https://morriase-forex-live-server.hf.space/predict";   // API URL
    input long              inpMagic = 123456;                                 // EA magic number
    input IntervalTime      UpdateIntervalSeconds = 0;                         // Update interval
    input int               updateSeconds = 10;                                // Update interval in Seconds if "Every X Seconds" selected
@@ -204,7 +206,7 @@ int buyLossCount = 0;
 int sellLossCount = 0;
 
 //--- Allowed trading pairs (models trained on these)
-string allowedPairs[] = {"EURUSD", "GBPUSD", "AUDUSD", "USDJPY", "EUR_USD", "GBP_USD", "AUD_USD", "USD_JPY"};
+string allowedPairs[] = {"EURUSD", "GBPUSD", "AUDUSD", "USDJPY", "XAUUSD", "USDCHF","USDCAD", "NZDUSD", "XAU_USD", "USD_CAD", "NZD_USD", "EUR_USD", "USD_CHF", "GBP_USD", "AUD_USD", "USD_JPY"};
 
 //--- Maximum positions per chart
 #define MAX_POSITIONS_PER_CHART 2
@@ -312,6 +314,7 @@ void OnDeinit(const int reason)
 //+------------------------------------------------------------------+
 void OnTick()
 {
+
    licenseVerifier.OnTick();
    if (!licenseVerifier.IsValid()) return;
    

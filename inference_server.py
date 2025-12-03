@@ -7,6 +7,7 @@ Architecture:
 - Server engineers features using EXACT training pipeline
 - Server validates features match model schema
 - Server returns predictions with confidence scores
+- Live sentiment from Marketaux API (optional)
 """
 import os
 import gc
@@ -14,6 +15,7 @@ from src.config import MODELS_DIR, CURRENCY_PAIRS, SENTIMENT_EMA_PERIODS, ENABLE
 from src.feature_engineering.technical_features import TechnicalFeatureEngineer
 from src.data_acquisition.macro_data import MacroDataAcquisition
 from src.data_acquisition.news_data import NewsDataAcquisition
+from src.data_acquisition.live_news_loader import MarketauxNewsLoader
 from src.feature_engineering.sentiment_features import SentimentAnalyzer
 from src.models.hybrid_ensemble import HybridEnsemble
 from flask import Flask, request, jsonify
@@ -24,6 +26,7 @@ import joblib
 from pathlib import Path
 from loguru import logger
 from datetime import datetime, timedelta
+from typing import Dict
 import sys
 
 # Add project root
@@ -74,8 +77,41 @@ except Exception as e:
     logger.error(f"✗ Failed to initialize MacroDataAcquisition: {e}")
     raise
 
-# Only load sentiment components if live sentiment is enabled
-if ENABLE_LIVE_SENTIMENT:
+# Initialize FRED Macro Loader for real economic data
+FRED_LOADER = None
+try:
+    from src.data_acquisition.fred_macro_loader import FREDMacroLoader
+    logger.info("Initializing FREDMacroLoader...")
+    FRED_LOADER = FREDMacroLoader()
+    if FRED_LOADER.api_key:
+        logger.info(f"✓ FREDMacroLoader initialized (API key configured)")
+    else:
+        logger.warning(
+            "⚠ FREDMacroLoader: No API key - will use placeholder macro features")
+except ImportError:
+    logger.warning("⚠ FREDMacroLoader not available")
+    FRED_LOADER = None
+except Exception as e:
+    logger.warning(f"⚠ FREDMacroLoader error: {e}")
+    FRED_LOADER = None
+
+# Initialize Marketaux live news loader for sentiment
+LIVE_NEWS_LOADER = None
+try:
+    logger.info("Initializing MarketauxNewsLoader...")
+    LIVE_NEWS_LOADER = MarketauxNewsLoader()
+    status = LIVE_NEWS_LOADER.get_health_status()
+    if status["api_configured"]:
+        logger.info(f"✓ MarketauxNewsLoader initialized (API key configured)")
+    else:
+        logger.warning(
+            "⚠ MarketauxNewsLoader: No API key - will use neutral sentiment")
+except Exception as e:
+    logger.warning(f"⚠ MarketauxNewsLoader not available: {e}")
+    LIVE_NEWS_LOADER = None
+
+# Only load legacy sentiment components if live sentiment is enabled AND no Marketaux
+if ENABLE_LIVE_SENTIMENT and LIVE_NEWS_LOADER is None:
     try:
         logger.info("Initializing NewsDataAcquisition...")
         NEWS_ACQUIRER = NewsDataAcquisition()
@@ -90,7 +126,10 @@ if ENABLE_LIVE_SENTIMENT:
 else:
     NEWS_ACQUIRER = None
     SENTIMENT_ANALYZER = None
-    logger.info("Sentiment analysis disabled")
+    if LIVE_NEWS_LOADER:
+        logger.info("Using Marketaux for live sentiment")
+    else:
+        logger.info("Sentiment analysis disabled")
 
 logger.info("=" * 80)
 logger.info("SERVER INITIALIZATION COMPLETE")
@@ -300,16 +339,133 @@ def validate_features(feature_names: list, schema: dict, pair: str):
     logger.success(f"{pair}: Feature validation passed ✓")
 
 
+def get_live_sentiment_features(hours_back: int = 24) -> Dict:
+    """
+    Get live sentiment features from Marketaux API.
+
+    Returns:
+        Dictionary with sentiment features matching training format
+    """
+    if LIVE_NEWS_LOADER is None:
+        logger.debug("No live news loader - returning neutral sentiment")
+        return {
+            "positive": 0.0,
+            "negative": 0.0,
+            "neutral": 1.0,
+            "polarity": 0.0,
+            "article_count": 0,
+            "source": "none"
+        }
+
+    try:
+        sentiment = LIVE_NEWS_LOADER.get_sentiment_features(
+            hours_back=hours_back)
+        sentiment["source"] = "marketaux"
+        return sentiment
+    except Exception as e:
+        logger.error(f"Failed to get live sentiment: {e}")
+        return {
+            "positive": 0.0,
+            "negative": 0.0,
+            "neutral": 1.0,
+            "polarity": 0.0,
+            "article_count": 0,
+            "source": "error"
+        }
+
+
+@app.route('/sentiment', methods=['GET'])
+def get_sentiment():
+    """
+    Get current forex market sentiment from Marketaux API.
+
+    Query parameters:
+        hours_back: Number of hours to look back for news (default: 24)
+
+    Returns:
+        JSON with sentiment features:
+        {
+            "polarity": -1 to 1,
+            "positive": 0 to 1,
+            "negative": 0 to 1,
+            "neutral": 0 to 1,
+            "polarity_ema_3": float,
+            "polarity_ema_7": float,
+            "polarity_ema_14": float,
+            "article_count": int,
+            "source": "marketaux" | "none" | "error",
+            "timestamp": ISO datetime
+        }
+    """
+    try:
+        hours_back = request.args.get('hours_back', 24, type=int)
+        # Limit to 1-168 hours (1 week)
+        hours_back = max(1, min(hours_back, 168))
+
+        sentiment = get_live_sentiment_features(hours_back=hours_back)
+        sentiment["timestamp"] = datetime.now().isoformat()
+
+        # Log for monitoring
+        logger.info(
+            f"Sentiment request: polarity={sentiment.get('polarity', 0):.3f}, "
+            f"articles={sentiment.get('article_count', 0)}, source={sentiment.get('source', 'unknown')}"
+        )
+
+        return jsonify(sentiment)
+
+    except Exception as e:
+        logger.error(f"Sentiment endpoint error: {e}")
+        return jsonify({
+            "error": str(e),
+            "polarity": 0.0,
+            "source": "error",
+            "timestamp": datetime.now().isoformat()
+        }), 500
+
+
+@app.route('/sentiment/status', methods=['GET'])
+def get_sentiment_status():
+    """
+    Get Marketaux API status and usage information.
+
+    Returns:
+        JSON with API health status
+    """
+    if LIVE_NEWS_LOADER is None:
+        return jsonify({
+            "configured": False,
+            "message": "Marketaux API not configured. Set MARKETAUX_API_KEY environment variable."
+        })
+
+    try:
+        status = LIVE_NEWS_LOADER.get_health_status()
+        status["timestamp"] = datetime.now().isoformat()
+        return jsonify(status)
+    except Exception as e:
+        logger.error(f"Sentiment status error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/health', methods=['GET'])
 def health_check():
     """
     Health check endpoint
     """
+    # Include sentiment status in health check
+    sentiment_status = "disabled"
+    if LIVE_NEWS_LOADER:
+        status = LIVE_NEWS_LOADER.get_health_status()
+        if status["api_configured"]:
+            sentiment_status = f"enabled ({status['daily_requests_used']}/100 requests used)"
+        else:
+            sentiment_status = "no_api_key"
+
     return jsonify({
         'status': 'healthy',
         'timestamp': datetime.now().isoformat(),
         'models_loaded': list(MODELS.keys()),
-        'supported_pairs': CURRENCY_PAIRS
+        'supported_pairs': CURRENCY_PAIRS,
+        'sentiment': sentiment_status
     })
 
 

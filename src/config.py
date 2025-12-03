@@ -39,10 +39,15 @@ OANDA_API_KEY = os.getenv("OANDA_API_KEY", "")
 OANDA_ACCOUNT_ID = os.getenv("OANDA_ACCOUNT_ID", "")
 FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY", "")
 TRADING_ECONOMICS_API_KEY = os.getenv("TRADING_ECONOMICS_API_KEY", "")
+# Free tier: 100 requests/day
+MARKETAUX_API_KEY = os.getenv("MARKETAUX_API_KEY", "")
+# FRED API (Federal Reserve Economic Data) - 120 requests/minute
+FRED_API_KEY = os.getenv("FRED_API_KEY", "")
 
 # Currency Pairs Configuration
-CURRENCY_PAIRS = ["EUR_USD", "GBP_USD", "USD_JPY",
-                  "AUD_USD", "XAU_USD", "USD_CAD", "USD_CHF", "NZD_USD"]
+# First batch (training now)
+CURRENCY_PAIRS = ["EUR_USD", "GBP_USD", "USD_JPY", "AUD_USD"]
+# Second batch (train later): ["XAU_USD", "USD_CAD", "USD_CHF", "NZD_USD"]
 
 PRIMARY_PAIR = "EUR_USD"  # Primary pair for training and evaluation
 
@@ -81,7 +86,13 @@ LDA_NUM_TOPICS = 10  # Latent Dirichlet Allocation topics
 # Live Sentiment Configuration (for inference server)
 # Disable by default for performance (adds 1-2s latency)
 ENABLE_LIVE_SENTIMENT = False
-SENTIMENT_CACHE_MINUTES = 5  # Cache duration for live sentiment to reduce API calls
+
+# Cache duration for live sentiment (minutes)
+# Higher values reduce API calls for high-frequency EAs:
+# - 5 min: ~288 requests/day if predicting every 5 min → OK for free tier (100/day)
+# - 60 min: ~24 requests/day → Very safe for free tier
+# Sentiment doesn't change rapidly, so longer cache is fine for trading
+SENTIMENT_CACHE_MINUTES = 60  # Default to hourly cache for rate limiting safety
 
 # COT Data Configuration
 COT_FUTURES_CONTRACTS = {
