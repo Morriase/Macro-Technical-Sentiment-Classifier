@@ -53,15 +53,15 @@ class HybridEnsemble:
         self.xgb_params = xgb_params or {
             "objective": "multi:softprob",
             "num_class": 3,
-            "max_depth": 6,
+            "max_depth": 5,  # Reduced from 6 to prevent overfitting
             "learning_rate": 0.05,
             "n_estimators": 300,
-            "subsample": 0.8,
-            "colsample_bytree": 0.8,
+            "subsample": 0.7,  # Increased randomness
+            "colsample_bytree": 0.7,  # Increased randomness
             "min_child_weight": 3,
-            "gamma": 0.1,
-            "reg_alpha": 0.05,
-            "reg_lambda": 1.0,
+            "gamma": 0.2,  # Increased gamma for regularization
+            "reg_alpha": 0.5,  # Increased L1 regularization
+            "reg_lambda": 2.0,  # Increased L2 regularization
             "scale_pos_weight": 1.0,
             "eval_metric": "mlogloss",
             "random_state": random_state,
@@ -273,7 +273,8 @@ class HybridEnsemble:
         """
         # logger.info("Training Hybrid Ensemble")
         # logger.info(f"Training samples: {len(X)}, Features: {X.shape[1]}")
-        logger.info(f"Hybrid Ensemble fit: X.shape={X.shape}, y.shape={y.shape}")
+        logger.info(
+            f"Hybrid Ensemble fit: X.shape={X.shape}, y.shape={y.shape}")
 
         # Store feature metadata (CRITICAL for inference server validation)
         self.n_features_ = X.shape[1]
@@ -292,24 +293,25 @@ class HybridEnsemble:
         if len(X) > max_samples_for_oof:
             logger.info(
                 f"Dataset too large ({len(X):,} samples) for OOF - using simple split")
-            
+
             # CRITICAL: Add gap between train/val to prevent LSTM sequence leakage
             # LSTM uses sequence_length lookback, so we need a gap to prevent
             # validation sequences from overlapping with training data
             seq_length = self.lstm_params.get('sequence_length', 22)
             gap = seq_length * 2  # Double the sequence length for safety
-            
+
             # Use last 20% as holdout for meta-learner training
             split_idx = int(len(X_scaled) * 0.8)
             X_train_base = X_scaled[:split_idx - gap]  # Leave gap before split
             y_train_base = y[:split_idx - gap]
             X_holdout = X_scaled[split_idx:]  # Holdout starts after gap
             y_holdout = y[split_idx:]
-            
-            logger.info(f"  Train/Val gap: {gap} samples (prevents LSTM sequence leakage)")
+
+            logger.info(
+                f"  Train/Val gap: {gap} samples (prevents LSTM sequence leakage)")
 
             # Subsample if still too large
-            max_train = 30000
+            max_train = 500000  # Increased from 30k to 500k to prevent underfitting
             if len(X_train_base) > max_train:
                 X_train_base = X_train_base[-max_train:]
                 y_train_base = y_train_base[-max_train:]
@@ -318,8 +320,9 @@ class HybridEnsemble:
             # Train base learners on subsampled data
             logger.info("Training XGBoost base learner...")
             from sklearn.utils.class_weight import compute_sample_weight
+            # Less aggressive class weights to prevent overfitting to minority classes
             sample_weights = compute_sample_weight(
-                class_weight={0: 3.0, 1: 3.0, 2: 1.0},
+                class_weight={0: 2.0, 1: 2.0, 2: 1.0},
                 y=y_train_base
             )
             self.xgb_base.fit(

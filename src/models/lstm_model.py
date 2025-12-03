@@ -133,14 +133,14 @@ class LSTMSequenceModel:
         hidden_size: int = 128,
         num_layers: int = 2,
         num_classes: int = 3,
-        dropout: float = 0.3,
+        dropout: float = 0.4,  # Increased from 0.3 to prevent overfitting
         learning_rate: float = 0.001,
         batch_size: int = 64,
         epochs: int = 100,
         early_stopping_patience: int = 10,
         device: Optional[str] = None,
         l1_lambda: float = 1e-5,
-        l2_lambda: float = 2e-3,
+        l2_lambda: float = 3e-3,  # Increased from 2e-3
         beta1: float = 0.9,
         beta2: float = 0.999,
     ):
@@ -399,6 +399,8 @@ class LSTMSequenceModel:
         for epoch in range(self.epochs):
             self.model.train()
             total_loss = 0
+            train_correct = 0
+            train_total = 0
             optimizer.zero_grad()
 
             # Mini-batch training with DataLoader (parallel data loading)
@@ -457,19 +459,18 @@ class LSTMSequenceModel:
 
                 total_loss += loss.item() * self.gradient_accumulation_steps
 
+                # Calculate training accuracy for this batch
+                with torch.no_grad():
+                    preds = torch.argmax(outputs, dim=1)
+                    train_correct += (preds == y_batch).sum().item()
+                    train_total += y_batch.size(0)
+
             # Calculate average loss (number of batches)
             num_batches = len(train_loader)
             avg_loss = total_loss / num_batches
 
-            # Compute training accuracy on a sample (to avoid OOM on large datasets)
-            # Use last batch for efficiency
-            self.model.eval()
-            with torch.no_grad():
-                # Use the last batch from training loop for quick estimate
-                # X_batch and y_batch are already on GPU from the loop
-                train_logits = self.model(X_batch)
-                train_preds = torch.argmax(train_logits, dim=1)
-                train_acc = (train_preds == y_batch).float().mean().item()
+            # Calculate average training accuracy
+            train_acc = train_correct / train_total if train_total > 0 else 0.0
 
             # Record training metrics
             self.train_losses.append(avg_loss)
