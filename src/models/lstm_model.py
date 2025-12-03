@@ -192,11 +192,10 @@ class LSTMSequenceModel:
             dropout=dropout,
         ).to(self.device)
 
-        # Enable multi-GPU training if available
-        if torch.cuda.device_count() > 1:
-            logger.info(
-                f"Using {torch.cuda.device_count()} GPUs via DataParallel")
-            self.model = nn.DataParallel(self.model)
+        # Enable multi-GPU training if available.
+        # NOTE: DataParallel can increase memory overhead; on Kaggle a single
+        # T4 is usually enough, so we keep the model on one device by default.
+        # If you really want multi-GPU, wrap the model outside this class.
 
         # Mixed precision training (for faster GPU training)
         self.use_amp = GPU_CONFIG['mixed_precision']

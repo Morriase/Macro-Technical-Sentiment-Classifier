@@ -50,18 +50,20 @@ class HybridEnsemble:
         self.random_state = random_state
 
         # Base Learner 1: XGBoost for tabular features
+        # NOTE: Defaults below are a **low‑memory, regularized** profile tuned for Kaggle.
+        # You can override by passing xgb_params when constructing HybridEnsemble.
         self.xgb_params = xgb_params or {
             "objective": "multi:softprob",
             "num_class": 3,
-            "max_depth": 5,  # Reduced from 6 to prevent overfitting
+            "max_depth": 4,          # shallower trees to cut RAM + overfitting
             "learning_rate": 0.05,
-            "n_estimators": 300,
-            "subsample": 0.7,  # Increased randomness
-            "colsample_bytree": 0.7,  # Increased randomness
-            "min_child_weight": 3,
-            "gamma": 0.2,  # Increased gamma for regularization
-            "reg_alpha": 0.5,  # Increased L1 regularization
-            "reg_lambda": 2.0,  # Increased L2 regularization
+            "n_estimators": 200,     # fewer trees for faster, lighter training
+            "subsample": 0.7,
+            "colsample_bytree": 0.7,
+            "min_child_weight": 4,
+            "gamma": 0.3,
+            "reg_alpha": 0.8,
+            "reg_lambda": 3.0,
             "scale_pos_weight": 1.0,
             "eval_metric": "mlogloss",
             "random_state": random_state,
@@ -74,16 +76,17 @@ class HybridEnsemble:
         self.xgb_base = xgb.XGBClassifier(**self.xgb_params)
 
         # Base Learner 2: LSTM for sequence modeling
+        # Default profile is intentionally compact for Kaggle (~16‑step window, small hidden size).
         self.lstm_params = lstm_params or {
-            "sequence_length": 22,  # ~1 month of trading days
-            "hidden_size": 64,  # Reduced for memory
-            "num_layers": 2,
+            "sequence_length": 16,
+            "hidden_size": 48,
+            "num_layers": 1,
             "num_classes": 3,
-            "dropout": 0.3,
+            "dropout": 0.4,
             "learning_rate": 0.001,
-            "batch_size": 128,  # Reduced for memory
-            "epochs": 50,  # Early stopping will kick in
-            "early_stopping_patience": 10,
+            "batch_size": 64,
+            "epochs": 30,
+            "early_stopping_patience": 7,
         }
 
         self.lstm_base = None  # Initialized during fit
@@ -310,12 +313,19 @@ class HybridEnsemble:
             logger.info(
                 f"  Train/Val gap: {gap} samples (prevents LSTM sequence leakage)")
 
-            # Subsample if still too large
-            max_train = 500000  # Increased from 30k to 500k to prevent underfitting
+            # Subsample if still too large (aggressively, for Kaggle RAM)
+            max_train = 120_000
+            max_holdout = 20_000
+
             if len(X_train_base) > max_train:
                 X_train_base = X_train_base[-max_train:]
                 y_train_base = y_train_base[-max_train:]
                 logger.info(f"  Subsampled training to {max_train:,} samples")
+
+            if len(X_holdout) > max_holdout:
+                X_holdout = X_holdout[-max_holdout:]
+                y_holdout = y_holdout[-max_holdout:]
+                logger.info(f"  Subsampled holdout to {max_holdout:,} samples")
 
             # Train base learners on subsampled data
             logger.info("Training XGBoost base learner...")
@@ -328,8 +338,8 @@ class HybridEnsemble:
             self.xgb_base.fit(
                 X_train_base, y_train_base,
                 sample_weight=sample_weights,
-                # Small eval set
-                eval_set=[(X_holdout[:10000], y_holdout[:10000])],
+                # Very small eval set to reduce memory
+                eval_set=[(X_holdout[:3000], y_holdout[:3000])],
                 verbose=50,
             )
 
@@ -337,9 +347,13 @@ class HybridEnsemble:
             self.lstm_base = LSTMSequenceModel(
                 input_size=X_scaled.shape[1], **self.lstm_params
             )
-            self.lstm_base.fit(X_train_base, y_train_base,
-                               X_holdout[:10000], y_holdout[:10000],
-                               save_plots_path=save_plots_path)
+            self.lstm_base.fit(
+                X_train_base,
+                y_train_base,
+                X_holdout[:5000],
+                y_holdout[:5000],
+                save_plots_path=save_plots_path,
+            )
 
             # Generate meta-features from holdout predictions
             logger.info("Generating meta-features from holdout set...")
