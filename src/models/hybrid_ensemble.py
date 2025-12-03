@@ -55,17 +55,18 @@ class HybridEnsemble:
         self.xgb_params = xgb_params or {
             "objective": "multi:softprob",
             "num_class": 3,
-            "max_depth": 6,
-            "learning_rate": 0.05,
-            "n_estimators": 200,
+            "max_depth": 5,
+            "learning_rate": 0.03,
+            "n_estimators": 500,  # Will early stop before this
             "subsample": 0.8,
             "colsample_bytree": 0.8,
-            "min_child_weight": 2,
+            "min_child_weight": 3,
             "gamma": 0.1,
             "reg_alpha": 0.1,
-            "reg_lambda": 1.0,
+            "reg_lambda": 1.5,
             "scale_pos_weight": 1.0,
             "eval_metric": "mlogloss",
+            "early_stopping_rounds": 30,  # CRITICAL: Stop when val loss increases
             "random_state": random_state,
             # Use GPU for training (XGBoost 2.0+: use 'hist' with device='cuda')
             "tree_method": "hist",
@@ -305,27 +306,46 @@ class HybridEnsemble:
 
             # Use last 20% as holdout for meta-learner training
             split_idx = int(len(X_scaled) * 0.8)
-            X_train_base = X_scaled[:split_idx - gap]  # Leave gap before split
-            y_train_base = y[:split_idx - gap]
-            X_holdout = X_scaled[split_idx:]  # Holdout starts after gap
-            y_holdout = y[split_idx:]
+            X_train_full = X_scaled[:split_idx - gap]  # Leave gap before split
+            y_train_full = y[:split_idx - gap]
+            X_holdout_full = X_scaled[split_idx:]  # Holdout starts after gap
+            y_holdout_full = y[split_idx:]
 
             logger.info(
                 f"  Train/Val gap: {gap} samples (prevents LSTM sequence leakage)")
 
-            # Subsample if still too large (aggressively, for Kaggle RAM)
-            max_train = 120_000
-            max_holdout = 20_000
+            # Subsample using STRATIFIED RANDOM SAMPLING (not tail!) for balanced classes
+            max_train = 50_000  # Reduced for Kaggle RAM
+            max_holdout = 10_000
 
-            if len(X_train_base) > max_train:
-                X_train_base = X_train_base[-max_train:]
-                y_train_base = y_train_base[-max_train:]
-                logger.info(f"  Subsampled training to {max_train:,} samples")
+            if len(X_train_full) > max_train:
+                # Use stratified sampling to maintain class balance
+                from sklearn.model_selection import train_test_split
+                _, X_train_base, _, y_train_base = train_test_split(
+                    X_train_full, y_train_full,
+                    test_size=max_train,
+                    stratify=y_train_full,
+                    random_state=self.random_state
+                )
+                logger.info(
+                    f"  Stratified sample: {max_train:,} training samples")
+            else:
+                X_train_base = X_train_full
+                y_train_base = y_train_full
 
-            if len(X_holdout) > max_holdout:
-                X_holdout = X_holdout[-max_holdout:]
-                y_holdout = y_holdout[-max_holdout:]
-                logger.info(f"  Subsampled holdout to {max_holdout:,} samples")
+            if len(X_holdout_full) > max_holdout:
+                # Take from END of holdout (most recent data for validation)
+                X_holdout = X_holdout_full[-max_holdout:]
+                y_holdout = y_holdout_full[-max_holdout:]
+                logger.info(f"  Holdout: last {max_holdout:,} samples")
+            else:
+                X_holdout = X_holdout_full
+                y_holdout = y_holdout_full
+
+            # Clean up large arrays
+            del X_train_full, y_train_full, X_holdout_full, y_holdout_full
+            import gc
+            gc.collect()
 
             # Train base learners on subsampled data
             logger.info("Training XGBoost base learner...")
