@@ -65,9 +65,9 @@ class HybridEnsemble:
             "scale_pos_weight": 1.0,
             "eval_metric": "mlogloss",
             "random_state": random_state,
-            # Use GPU for training (10-100x faster!)
-            "tree_method": "gpu_hist",
-            "device": "cuda",  # Explicitly use CUDA
+            # Use GPU for training (XGBoost 2.0+: use 'hist' with device='cuda')
+            "tree_method": "hist",
+            "device": "cuda",
             "n_jobs": 1,  # Must be 1 when using GPU
         }
 
@@ -101,8 +101,9 @@ class HybridEnsemble:
             "reg_lambda": 1.0,
             "eval_metric": "mlogloss",
             "random_state": random_state,
-            "tree_method": "gpu_hist",  # Use GPU for training
-            "device": "cuda",  # Explicitly use CUDA
+            # Use GPU for training (XGBoost 2.0+: use 'hist' with device='cuda')
+            "tree_method": "hist",
+            "device": "cuda",
             "n_jobs": 1,  # Must be 1 when using GPU
         }
 
