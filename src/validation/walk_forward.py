@@ -183,6 +183,10 @@ class WalkForwardOptimizer:
         Returns:
             Optimization metric value
         """
+        # Log trial start
+        logger.info(
+            f"  Trial {trial.number + 1}/{self.optuna_config['n_trials']}: Testing hyperparameters...")
+
         # Suggest hyperparameters for XGBoost base learner
         xgb_params = {
             "objective": "multi:softprob",
@@ -225,6 +229,8 @@ class WalkForwardOptimizer:
         else:
             score = balanced_accuracy_score(y_val, y_pred)
 
+        logger.info(
+            f"  Trial {trial.number + 1} completed: {metric_name}={score:.4f}")
         return score
 
     def _calculate_profit_factor(

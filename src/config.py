@@ -129,7 +129,7 @@ ENSEMBLE_CONFIG = {
             "num_layers": 2,
             "dropout": 0.5,
             "learning_rate": 0.00025,
-            "batch_size": 512,  # Increased for GPU throughput
+            "batch_size": 256,  # Balanced for GPU/RAM
             "epochs": 100,
             "early_stopping_patience": 10,
             # Regularization (L2 only for now - simpler and effective)
@@ -235,8 +235,8 @@ CUDA_DEVICE_COUNT = torch.cuda.device_count() if USE_CUDA else 0
 GPU_CONFIG = {
     "device": DEVICE,
     "use_cuda": USE_CUDA,
-    "num_workers": 2,  # DataLoader workers for prefetching
-    "pin_memory": USE_CUDA,  # Pin memory for faster GPU transfer
+    "num_workers": 0,  # Disabled - workers duplicate data in RAM
+    "pin_memory": False,  # Disabled to save host RAM
     # Use AMP (Automatic Mixed Precision) for faster training
     "mixed_precision": USE_CUDA,
     "cudnn_benchmark": USE_CUDA,  # Enable cuDNN auto-tuner

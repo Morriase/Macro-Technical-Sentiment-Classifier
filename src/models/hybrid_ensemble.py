@@ -81,7 +81,7 @@ class HybridEnsemble:
             "num_classes": 3,
             "dropout": 0.3,
             "learning_rate": 0.001,
-            "batch_size": 512,  # Larger batch for GPU throughput
+            "batch_size": 256,  # Balanced for GPU/RAM
             "epochs": 50,  # Reduced from 100 (early stopping will kick in)
             "early_stopping_patience": 10,
         }
@@ -119,6 +119,17 @@ class HybridEnsemble:
         # Reduced logging for cleaner output
         # logger.info("Hybrid Ensemble initialized: XGBoost + LSTM + XGBoost Meta")
 
+    def _xgb_predict_proba(self, model: xgb.XGBClassifier, X: np.ndarray) -> np.ndarray:
+        """
+        GPU-compatible XGBoost prediction using DMatrix.
+        Avoids device mismatch warning when model is on CUDA.
+        """
+        dmatrix = xgb.DMatrix(X)
+        # get_booster().predict returns flattened probabilities, reshape to (n_samples, n_classes)
+        preds = model.get_booster().predict(dmatrix, output_margin=False)
+        n_classes = model.n_classes_
+        return preds.reshape(-1, n_classes).astype(np.float32)
+
     def generate_out_of_fold_predictions(
         self, X: np.ndarray, y: np.ndarray
     ) -> Tuple[np.ndarray, np.ndarray]:
@@ -149,7 +160,8 @@ class HybridEnsemble:
         tscv = TimeSeriesSplit(n_splits=self.n_folds)
 
         for fold_idx, (train_idx, val_idx) in enumerate(tscv.split(X)):
-            logger.info(f"OOF fold {fold_idx + 1}/{self.n_folds}")
+            logger.info(
+                f"OOF fold {fold_idx + 1}/{self.n_folds} - Train: {len(train_idx)} samples, Val: {len(val_idx)} samples")
 
             # Use float32 views to reduce memory
             X_train_fold = X[train_idx].astype(np.float32)
@@ -157,6 +169,7 @@ class HybridEnsemble:
             X_val_fold = X[val_idx].astype(np.float32)
 
             # ===== XGBoost FIRST (then delete) =====
+            logger.info(f"  → Training XGBoost (fold {fold_idx + 1})...")
             from sklearn.utils.class_weight import compute_sample_weight
             fold_sample_weights = compute_sample_weight(
                 class_weight={0: 3.0, 1: 3.0, 2: 1.0},
@@ -167,11 +180,19 @@ class HybridEnsemble:
             xgb_fold.fit(
                 X_train_fold, y_train_fold,
                 sample_weight=fold_sample_weights,
-                eval_set=[(X_val_fold, y[val_idx])],
-                verbose=False,
+                eval_set=[(X_train_fold, y_train_fold),
+                          (X_val_fold, y[val_idx])],
+                verbose=20,  # Log every 20 rounds for OOF folds
             )
-            xgb_oof_proba[val_idx] = xgb_fold.predict_proba(
-                X_val_fold).astype(np.float32)
+            # Use helper for GPU-compatible prediction
+            xgb_oof_proba[val_idx] = self._xgb_predict_proba(
+                xgb_fold, X_val_fold)
+
+            # Log XGBoost fold accuracy
+            xgb_pred = np.argmax(xgb_oof_proba[val_idx], axis=1)
+            xgb_acc = (xgb_pred == y[val_idx]).mean()
+            logger.info(
+                f"    XGBoost fold {fold_idx + 1} Val Accuracy: {xgb_acc:.4f}")
 
             # DELETE XGBoost immediately
             del xgb_fold, fold_sample_weights
@@ -180,11 +201,20 @@ class HybridEnsemble:
                 torch.cuda.empty_cache()
 
             # ===== LSTM SECOND (then delete) =====
+            logger.info(f"  → Training LSTM (fold {fold_idx + 1})...")
             lstm_fold = LSTMSequenceModel(
                 input_size=n_features, **self.lstm_params
             )
             lstm_fold.fit(X_train_fold, y_train_fold, X_val_fold, y[val_idx])
             lstm_proba_fold = lstm_fold.predict_proba(X_val_fold)
+
+            # Log LSTM fold accuracy
+            lstm_pred = np.argmax(lstm_proba_fold, axis=1)
+            # Align with val_idx (LSTM has sequence offset)
+            y_val_aligned = y[val_idx][-len(lstm_pred):]
+            lstm_acc = (lstm_pred == y_val_aligned).mean()
+            logger.info(
+                f"    LSTM fold {fold_idx + 1} Val Accuracy: {lstm_acc:.4f}")
 
             # Handle shape mismatch
             seq_len = self.lstm_params.get("sequence_length", 10)
@@ -262,11 +292,12 @@ class HybridEnsemble:
                 X_scaled,
                 y,
                 sample_weight=sample_weights,
-                eval_set=[(X_val_scaled, y_val)],
-                verbose=True,
+                eval_set=[(X_scaled, y), (X_val_scaled, y_val)],
+                verbose=10,  # Log every 10 rounds
             )
         else:
-            self.xgb_base.fit(X_scaled, y, sample_weight=sample_weights)
+            self.xgb_base.fit(
+                X_scaled, y, sample_weight=sample_weights, verbose=10)
 
         logger.info("Training LSTM base learner on full dataset")
         self.lstm_base = LSTMSequenceModel(
@@ -289,8 +320,9 @@ class HybridEnsemble:
         # Step 4: Train meta-classifier on OOF predictions
         logger.info("Training XGBoost meta-classifier")
         if X_val is not None and y_val is not None:
-            # Generate meta-features for validation set
-            xgb_val_proba = self.xgb_base.predict_proba(X_val_scaled)
+            # Generate meta-features for validation set (use helper for GPU-compatible XGBoost)
+            xgb_val_proba = self._xgb_predict_proba(
+                self.xgb_base, X_val_scaled)
             lstm_val_proba = self.lstm_base.predict_proba(X_val_scaled)
 
             # Handle LSTM sequence length mismatch (padding fix)
@@ -337,8 +369,8 @@ class HybridEnsemble:
         # Scale features
         X_scaled = self.scaler.transform(X)
 
-        # Get base learner predictions
-        xgb_proba = self.xgb_base.predict_proba(X_scaled)
+        # Get base learner predictions (use helper for GPU-compatible XGBoost)
+        xgb_proba = self._xgb_predict_proba(self.xgb_base, X_scaled)
         lstm_proba = self.lstm_base.predict_proba(X_scaled)
 
         # Handle LSTM sequence length mismatch (drops first sequence_length-1 samples)
@@ -352,8 +384,9 @@ class HybridEnsemble:
         # Concatenate for meta-learner
         meta_features = np.hstack([xgb_proba, lstm_proba])
 
-        # Meta-classifier prediction
-        final_proba = self.meta_classifier.predict_proba(meta_features)
+        # Meta-classifier prediction (use helper for GPU-compatible XGBoost)
+        final_proba = self._xgb_predict_proba(
+            self.meta_classifier, meta_features)
 
         return final_proba
 
@@ -387,7 +420,8 @@ class HybridEnsemble:
 
         X_scaled = self.scaler.transform(X)
 
-        xgb_proba = self.xgb_base.predict_proba(X_scaled)
+        # Use helper for GPU-compatible XGBoost prediction
+        xgb_proba = self._xgb_predict_proba(self.xgb_base, X_scaled)
         lstm_proba = self.lstm_base.predict_proba(X_scaled)
 
         return xgb_proba, lstm_proba

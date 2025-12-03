@@ -243,8 +243,8 @@ class LSTMSequenceModel:
             X, window_shape=self.sequence_length, axis=0)
 
         # Transpose to get (n_windows, window_size, n_features)
-        # This creates a view, not a copy
-        X_sequences = windows.transpose(0, 2, 1)
+        # Make a contiguous copy to avoid non-writable tensor warning
+        X_sequences = np.ascontiguousarray(windows.transpose(0, 2, 1))
 
         # Handle targets
         if y is not None:
@@ -516,17 +516,16 @@ class LSTMSequenceModel:
             # Step the learning rate scheduler (CosineAnnealing steps every epoch)
             scheduler.step()
 
-            # Only log every 10 epochs or at early stopping
-            if (epoch + 1) % 10 == 0:
-                if val_loader is not None:
-                    logger.info(
-                        f"Epoch {epoch+1}/{self.epochs} - "
-                        f"Loss: {avg_loss:.4f}, Val Loss: {avg_val_loss:.4f}, "
-                        f"Train Acc: {train_acc:.4f}, Val Acc: {val_acc:.4f}"
-                    )
-                else:
-                    logger.info(
-                        f"Epoch {epoch+1}/{self.epochs} - Loss: {avg_loss:.4f}")
+            # Log every epoch for full visibility during training
+            if val_loader is not None:
+                logger.info(
+                    f"    LSTM Epoch {epoch+1:3d}/{self.epochs} | "
+                    f"Train Loss: {avg_loss:.4f}, Acc: {train_acc:.3f} | "
+                    f"Val Loss: {avg_val_loss:.4f}, Acc: {val_acc:.3f}"
+                )
+            else:
+                logger.info(
+                    f"    LSTM Epoch {epoch+1:3d}/{self.epochs} | Train Loss: {avg_loss:.4f}, Acc: {train_acc:.3f}")
 
             # Early stopping
             if val_loader is not None:
