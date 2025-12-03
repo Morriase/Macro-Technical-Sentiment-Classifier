@@ -124,14 +124,14 @@ ENSEMBLE_CONFIG = {
             "random_state": 42,
         },
         "lstm": {
-            "sequence_length": 10,  # Reduced from 22 for memory savings
-            "hidden_size": 32,  # Reduced from 72 for memory savings
-            "num_layers": 1,  # Reduced from 2 for memory savings
-            "dropout": 0.3,  # Reduced dropout for smaller network
-            "learning_rate": 0.001,  # Increased for faster convergence with smaller model
-            "batch_size": 64,  # Reduced from 256 for memory savings
-            "epochs": 30,  # Reduced from 100 (smaller model converges faster)
-            "early_stopping_patience": 5,  # Reduced for faster training
+            "sequence_length": 22,  # ~1 month of trading days
+            "hidden_size": 72,  # Balanced capacity
+            "num_layers": 2,
+            "dropout": 0.5,
+            "learning_rate": 0.00025,
+            "batch_size": 256,
+            "epochs": 100,
+            "early_stopping_patience": 10,
             # Regularization (L2 only for now - simpler and effective)
             # L1 disabled (can enable later for feature selection)
             "l1_lambda": 0.0,
@@ -159,12 +159,11 @@ ENSEMBLE_CONFIG = {
 
 # Walk-Forward Optimization Configuration
 WFO_CONFIG = {
-    # In-sample period (6 months) - reduced for AUD_USD
     "train_window_months": 6,
-    "test_window_months": 2,  # Out-of-sample period
-    "step_months": 2,  # Rolling step size
-    "min_train_samples": 3000,  # Reduced from 5000 for shorter windows
-    "cv_folds": 2,  # Reduced from 3 for major memory savings in OOF
+    "test_window_months": 2,
+    "step_months": 2,
+    "min_train_samples": 3000,
+    "cv_folds": 5,  # Original value
 }
 
 # Hyperparameter Optimization
