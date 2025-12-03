@@ -258,9 +258,16 @@ class ForexClassifierPipeline:
 
                 if not fred_macro_df.empty:
                     # Merge FRED features with price features
+                    # Save original index name for restoration
+                    original_index_name = self.df_features.index.name or 'date'
                     self.df_features = self.df_features.reset_index()
 
-                    # Ensure date column compatibility
+                    # Ensure date column exists and is named correctly
+                    if original_index_name != 'date' and original_index_name in self.df_features.columns:
+                        self.df_features = self.df_features.rename(
+                            columns={original_index_name: 'date'})
+
+                    # Ensure date column compatibility (convert to date for merge)
                     self.df_features['date'] = pd.to_datetime(
                         self.df_features['date']).dt.date
                     fred_macro_df['date'] = pd.to_datetime(
@@ -281,6 +288,7 @@ class ForexClassifierPipeline:
                             self.df_features[col] = self.df_features[col].ffill().fillna(
                                 0)
 
+                    # Restore datetime index
                     self.df_features['date'] = pd.to_datetime(
                         self.df_features['date'])
                     self.df_features = self.df_features.set_index('date')
@@ -295,6 +303,15 @@ class ForexClassifierPipeline:
                     self.df_features["yield_curve"] = 0.0
             except Exception as e:
                 logger.warning(f"⚠ Failed to fetch FRED macro features: {e}")
+                # Ensure datetime index is preserved even on failure
+                if not isinstance(self.df_features.index, pd.DatetimeIndex):
+                    if 'date' in self.df_features.columns:
+                        self.df_features['date'] = pd.to_datetime(
+                            self.df_features['date'])
+                        self.df_features = self.df_features.set_index('date')
+                    else:
+                        logger.error(
+                            "Cannot restore datetime index - 'date' column missing")
                 self.df_features["rate_differential"] = 0.0
                 self.df_features["vix"] = 20.0
                 self.df_features["yield_curve"] = 0.0
