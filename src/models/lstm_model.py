@@ -292,16 +292,42 @@ class LSTMSequenceModel:
             y_val_tensor = None
 
         # Create DataLoader for efficient batching
-        from torch.utils.data import TensorDataset, DataLoader
+        from torch.utils.data import Dataset, DataLoader
         import gc
 
-        # Create dataset
-        train_dataset = TensorDataset(X_train_tensor, y_train_tensor)
+        # Lazy Dataset to avoid memory duplication
+        class LazyWindowDataset(Dataset):
+            def __init__(self, X, y, sequence_length):
+                self.X = torch.FloatTensor(X)  # Keep 2D tensor
+                self.y = torch.LongTensor(y) if y is not None else None
+                self.seq_len = sequence_length
+
+            def __len__(self):
+                return len(self.X) - self.seq_len
+
+            def __getitem__(self, idx):
+                # Slice window on the fly
+                x_window = self.X[idx: idx + self.seq_len]
+                if self.y is not None:
+                    y_label = self.y[idx + self.seq_len - 1]
+                    return x_window, y_label
+                return x_window
+
+        # Create dataset using LazyWindowDataset
+        # Note: X_scaled is numpy, convert to tensor inside dataset
+        train_dataset = LazyWindowDataset(X_scaled, y, self.sequence_length)
+
+        # Validation data
+        if X_val is not None and y_val is not None:
+            X_val_scaled = self.scaler.transform(X_val)
+            val_dataset = LazyWindowDataset(
+                X_val_scaled, y_val, self.sequence_length)
+        else:
+            val_dataset = None
 
         # Clean up intermediate arrays to free memory
-        del X_seq, y_seq, X_train_tensor, y_train_tensor
-        if X_val is not None:
-            del X_val_seq, y_val_seq, X_val_tensor, y_val_tensor
+        # X_scaled is now held by dataset (as tensor), so we can delete the numpy version
+        del X_scaled
         gc.collect()
 
         train_loader = DataLoader(
@@ -309,7 +335,7 @@ class LSTMSequenceModel:
             batch_size=self.batch_size,
             shuffle=True,
             num_workers=0,  # Disable multiprocessing to save memory
-            pin_memory=True,  # Faster GPU transfer
+            pin_memory=False,  # Disable pinned memory to save host RAM
         )
 
         # Initialize histories for diagnostics
@@ -350,6 +376,17 @@ class LSTMSequenceModel:
         best_val_loss = float('inf')
         best_val_acc = 0.0
         patience_counter = 0
+
+        # Validation loader (create once)
+        val_loader = None
+        if val_dataset is not None:
+            val_loader = DataLoader(
+                val_dataset,
+                batch_size=self.batch_size,
+                shuffle=False,
+                num_workers=0,
+                pin_memory=False
+            )
 
         for epoch in range(self.epochs):
             self.model.train()
@@ -420,72 +457,75 @@ class LSTMSequenceModel:
             # Use last batch for efficiency
             self.model.eval()
             with torch.no_grad():
-                # Sample up to 1000 random indices to estimate train accuracy
-                sample_size = min(1000, len(X_train_tensor))
-                sample_indices = torch.randperm(
-                    len(X_train_tensor))[:sample_size]
-                # Move sample to GPU
-                X_sample = X_train_tensor[sample_indices].to(self.device)
-                y_sample = y_train_tensor[sample_indices].to(self.device)
-
-                train_logits = self.model(X_sample)
+                # Use the last batch from training loop for quick estimate
+                # X_batch and y_batch are already on GPU from the loop
+                train_logits = self.model(X_batch)
                 train_preds = torch.argmax(train_logits, dim=1)
-                train_acc = (train_preds == y_sample).float().mean().item()
+                train_acc = (train_preds == y_batch).float().mean().item()
 
             # Record training metrics
             self.train_losses.append(avg_loss)
             self.train_accs.append(train_acc)
 
             # Validation
-            if X_val_tensor is not None:
+            if val_loader is not None:
                 self.model.eval()
-                with torch.no_grad():
-                    # Move validation data to GPU
-                    X_val_gpu = X_val_tensor.to(self.device)
-                    y_val_gpu = y_val_tensor.to(self.device)
+                val_loss = 0
+                val_correct = 0
+                val_total = 0
 
-                    val_outputs = self.model(X_val_gpu)
-                    val_loss = criterion(val_outputs, y_val_gpu).item()
-                    val_preds = torch.argmax(val_outputs, dim=1)
-                    val_acc = (val_preds == y_val_gpu).float().mean().item()
+                with torch.no_grad():
+                    for X_v, y_v in val_loader:
+                        X_v = X_v.to(self.device, non_blocking=True)
+                        y_v = y_v.to(self.device, non_blocking=True)
+
+                        outputs = self.model(X_v)
+                        loss = criterion(outputs, y_v)
+                        val_loss += loss.item()
+
+                        preds = torch.argmax(outputs, dim=1)
+                        val_correct += (preds == y_v).sum().item()
+                        val_total += y_v.size(0)
+
+                avg_val_loss = val_loss / len(val_loader)
+                val_acc = val_correct / val_total
 
                 # Record validation metrics
-                self.val_losses.append(val_loss)
+                self.val_losses.append(avg_val_loss)
                 self.val_accs.append(val_acc)
 
-                # Step the learning rate scheduler (CosineAnnealing steps every epoch)
-                scheduler.step()
-
-                # Only log every 10 epochs or at early stopping
-                if (epoch + 1) % 10 == 0:
-                    logger.info(
-                        f"Epoch {epoch+1}/{self.epochs} - "
-                        f"Loss: {avg_loss:.4f}, Val Loss: {val_loss:.4f}, "
-                        f"Train Acc: {train_acc:.4f}, Val Acc: {val_acc:.4f}"
-                    )
-
-                # Early stopping - monitor both val_loss AND val_acc
-                # Stop if val_loss improves OR val_acc improves (more robust)
-                improved = False
-                if val_loss < best_val_loss:
-                    best_val_loss = val_loss
-                    improved = True
-                if val_acc > best_val_acc:
+                # Check for improvement
+                if avg_val_loss < best_val_loss:
+                    best_val_loss = avg_val_loss
                     best_val_acc = val_acc
-                    improved = True
-
-                if improved:
                     patience_counter = 0
                 else:
                     patience_counter += 1
-                    if patience_counter >= self.early_stopping_patience:
-                        logger.info(
-                            f"Early stopping at epoch {epoch+1} - Val Loss: {val_loss:.4f}")
-                        break
             else:
-                if (epoch + 1) % 20 == 0:  # Log every 20 epochs instead of 10
+                # No validation set
+                avg_val_loss = 0
+                val_acc = 0
+            # Step the learning rate scheduler (CosineAnnealing steps every epoch)
+            scheduler.step()
+
+            # Only log every 10 epochs or at early stopping
+            if (epoch + 1) % 10 == 0:
+                if val_loader is not None:
+                    logger.info(
+                        f"Epoch {epoch+1}/{self.epochs} - "
+                        f"Loss: {avg_loss:.4f}, Val Loss: {avg_val_loss:.4f}, "
+                        f"Train Acc: {train_acc:.4f}, Val Acc: {val_acc:.4f}"
+                    )
+                else:
                     logger.info(
                         f"Epoch {epoch+1}/{self.epochs} - Loss: {avg_loss:.4f}")
+
+            # Early stopping
+            if val_loader is not None:
+                if patience_counter >= self.early_stopping_patience:
+                    logger.info(
+                        f"Early stopping at epoch {epoch+1} - Val Loss: {avg_val_loss:.4f}")
+                    break
 
         self.is_fitted = True
         # logger.info("LSTM training completed")
