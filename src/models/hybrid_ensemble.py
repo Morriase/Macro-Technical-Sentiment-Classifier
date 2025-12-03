@@ -164,17 +164,23 @@ class HybridEnsemble:
                 f"OOF fold {fold_idx + 1}/{self.n_folds} - Train: {len(train_idx):,} samples, Val: {len(val_idx):,} samples")
 
             # Subsample for memory efficiency on large datasets
-            max_train_samples = 30000  # Limit to prevent OOM
-            if len(train_idx) > max_train_samples:
+            max_samples = 25000  # Limit both train and val to prevent OOM
+            if len(train_idx) > max_samples:
                 # Take last N samples (most recent data for time series)
-                train_idx = train_idx[-max_train_samples:]
+                train_idx = train_idx[-max_samples:]
                 logger.info(
                     f"    Subsampled train to {len(train_idx):,} samples")
+
+            if len(val_idx) > max_samples:
+                # Take last N samples for validation too
+                val_idx = val_idx[-max_samples:]
+                logger.info(f"    Subsampled val to {len(val_idx):,} samples")
 
             # Use float32 to reduce memory
             X_train_fold = X[train_idx].astype(np.float32)
             y_train_fold = y[train_idx]
             X_val_fold = X[val_idx].astype(np.float32)
+            y_val_fold = y[val_idx]
 
             # ===== XGBoost FIRST (then delete) =====
             logger.info(f"  → Training XGBoost (fold {fold_idx + 1})...")
@@ -280,77 +286,95 @@ class HybridEnsemble:
         # Scale features
         X_scaled = self.scaler.fit_transform(X)
 
-        # Step 1: Generate OOF predictions for meta-learner training
-        xgb_oof_proba, lstm_oof_proba = self.generate_out_of_fold_predictions(
-            X_scaled, y
-        )
+        # Memory check - skip OOF for large datasets
+        max_samples_for_oof = 50000
+        if len(X) > max_samples_for_oof:
+            logger.info(
+                f"Dataset too large ({len(X):,} samples) for OOF - using simple split")
+            # Use last 20% as holdout for meta-learner training
+            split_idx = int(len(X_scaled) * 0.8)
+            X_train_base = X_scaled[:split_idx]
+            y_train_base = y[:split_idx]
+            X_holdout = X_scaled[split_idx:]
+            y_holdout = y[split_idx:]
 
-        # Step 2: Train base learners on full training set
-        # Compute sample weights to combat class imbalance
-        from sklearn.utils.class_weight import compute_sample_weight
-        sample_weights = compute_sample_weight(
-            class_weight={0: 3.0, 1: 3.0, 2: 1.0},  # BUY=0, SELL=1, HOLD=2
-            y=y
-        )
+            # Subsample if still too large
+            max_train = 30000
+            if len(X_train_base) > max_train:
+                X_train_base = X_train_base[-max_train:]
+                y_train_base = y_train_base[-max_train:]
+                logger.info(f"  Subsampled training to {max_train:,} samples")
 
-        logger.info("Training XGBoost base learner on full dataset")
-        if X_val is not None and y_val is not None:
-            X_val_scaled = self.scaler.transform(X_val)
-            self.xgb_base.fit(
-                X_scaled,
-                y,
-                sample_weight=sample_weights,
-                eval_set=[(X_scaled, y), (X_val_scaled, y_val)],
-                verbose=10,  # Log every 10 rounds
+            # Train base learners on subsampled data
+            logger.info("Training XGBoost base learner...")
+            from sklearn.utils.class_weight import compute_sample_weight
+            sample_weights = compute_sample_weight(
+                class_weight={0: 3.0, 1: 3.0, 2: 1.0},
+                y=y_train_base
             )
-        else:
             self.xgb_base.fit(
-                X_scaled, y, sample_weight=sample_weights, verbose=10)
+                X_train_base, y_train_base,
+                sample_weight=sample_weights,
+                # Small eval set
+                eval_set=[(X_holdout[:10000], y_holdout[:10000])],
+                verbose=50,
+            )
 
-        logger.info("Training LSTM base learner on full dataset")
-        self.lstm_base = LSTMSequenceModel(
-            input_size=X_scaled.shape[1], **self.lstm_params
-        )
+            logger.info("Training LSTM base learner...")
+            self.lstm_base = LSTMSequenceModel(
+                input_size=X_scaled.shape[1], **self.lstm_params
+            )
+            self.lstm_base.fit(X_train_base, y_train_base,
+                               X_holdout[:10000], y_holdout[:10000],
+                               save_plots_path=save_plots_path)
 
-        if X_val is not None and y_val is not None:
-            self.lstm_base.fit(X_scaled, y, X_val_scaled,
-                               y_val, save_plots_path=save_plots_path)
+            # Generate meta-features from holdout predictions
+            logger.info("Generating meta-features from holdout set...")
+            xgb_holdout_proba = self._xgb_predict_proba(
+                self.xgb_base, X_holdout)
+            lstm_holdout_proba = self.lstm_base.predict_proba(X_holdout)
+
+            # Handle LSTM sequence offset
+            if len(lstm_holdout_proba) < len(xgb_holdout_proba):
+                n_missing = len(xgb_holdout_proba) - len(lstm_holdout_proba)
+                uniform_proba = np.full(
+                    (n_missing, 3), 1.0/3, dtype=np.float32)
+                lstm_holdout_proba = np.vstack(
+                    [uniform_proba, lstm_holdout_proba])
+
+            meta_features = np.hstack([xgb_holdout_proba, lstm_holdout_proba])
+
+            # Train meta-classifier
+            logger.info("Training meta-classifier...")
+            self.meta_classifier.fit(meta_features, y_holdout, verbose=10)
+
         else:
+            # Original OOF approach for smaller datasets
+            xgb_oof_proba, lstm_oof_proba = self.generate_out_of_fold_predictions(
+                X_scaled, y
+            )
+            meta_features = np.hstack([xgb_oof_proba, lstm_oof_proba])
+
+            # Train base learners on full training set
+            from sklearn.utils.class_weight import compute_sample_weight
+            sample_weights = compute_sample_weight(
+                class_weight={0: 3.0, 1: 3.0, 2: 1.0},
+                y=y
+            )
+
+            logger.info("Training XGBoost base learner on full dataset")
+            self.xgb_base.fit(
+                X_scaled, y, sample_weight=sample_weights, verbose=50)
+
+            logger.info("Training LSTM base learner on full dataset")
+            self.lstm_base = LSTMSequenceModel(
+                input_size=X_scaled.shape[1], **self.lstm_params
+            )
             self.lstm_base.fit(X_scaled, y, save_plots_path=save_plots_path)
 
-        # Step 3: Prepare meta-features (OOF predictions)
-        # Concatenate probability predictions from both base learners
-        # Shape: (n_samples, n_classes * 2)
-        meta_features = np.hstack([xgb_oof_proba, lstm_oof_proba])
-
-        logger.info(f"Meta-features shape: {meta_features.shape}")
-
-        # Step 4: Train meta-classifier on OOF predictions
-        logger.info("Training XGBoost meta-classifier")
-        if X_val is not None and y_val is not None:
-            # Generate meta-features for validation set (use helper for GPU-compatible XGBoost)
-            xgb_val_proba = self._xgb_predict_proba(
-                self.xgb_base, X_val_scaled)
-            lstm_val_proba = self.lstm_base.predict_proba(X_val_scaled)
-
-            # Handle LSTM sequence length mismatch (padding fix)
-            if len(xgb_val_proba) != len(lstm_val_proba):
-                n_missing = len(xgb_val_proba) - len(lstm_val_proba)
-                n_classes = lstm_val_proba.shape[1]
-                uniform_proba = np.full(
-                    (n_missing, n_classes), 1.0 / n_classes)
-                lstm_val_proba = np.vstack([uniform_proba, lstm_val_proba])
-
-            meta_features_val = np.hstack([xgb_val_proba, lstm_val_proba])
-
-            self.meta_classifier.fit(
-                meta_features,
-                y,
-                eval_set=[(meta_features_val, y_val)],
-                verbose=True,
-            )
-        else:
-            self.meta_classifier.fit(meta_features, y)
+            # Train meta-classifier
+            logger.info("Training meta-classifier...")
+            self.meta_classifier.fit(meta_features, y, verbose=10)
 
         # Extract feature importance
         self.feature_importance_ = {
