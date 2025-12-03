@@ -33,7 +33,7 @@ class HybridEnsemble:
         xgb_params: Optional[Dict] = None,
         lstm_params: Optional[Dict] = None,
         meta_xgb_params: Optional[Dict] = None,
-        n_folds: int = 5,
+        n_folds: int = 3,  # Reduced from 5 for faster OOF generation
         random_state: int = 42,
     ):
         """
@@ -76,12 +76,12 @@ class HybridEnsemble:
         # Base Learner 2: LSTM for sequence modeling
         self.lstm_params = lstm_params or {
             "sequence_length": 22,  # ~1 month of trading days
-            "hidden_size": 64,  # Reduced from 128 to save GPU memory
+            "hidden_size": 128,  # Increased for GPU utilization
             "num_layers": 2,
             "num_classes": 3,
             "dropout": 0.3,
             "learning_rate": 0.001,
-            "batch_size": 32,  # Reduced from 64 to save memory
+            "batch_size": 512,  # Larger batch for GPU throughput
             "epochs": 50,  # Reduced from 100 (early stopping will kick in)
             "early_stopping_patience": 10,
         }

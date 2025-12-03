@@ -125,11 +125,11 @@ ENSEMBLE_CONFIG = {
         },
         "lstm": {
             "sequence_length": 22,  # ~1 month of trading days
-            "hidden_size": 72,  # Balanced capacity
+            "hidden_size": 128,  # Increased for better GPU utilization
             "num_layers": 2,
             "dropout": 0.5,
             "learning_rate": 0.00025,
-            "batch_size": 128,
+            "batch_size": 512,  # Increased for GPU throughput
             "epochs": 100,
             "early_stopping_patience": 10,
             # Regularization (L2 only for now - simpler and effective)
@@ -163,7 +163,7 @@ WFO_CONFIG = {
     "test_window_months": 2,
     "step_months": 2,
     "min_train_samples": 3000,
-    "cv_folds": 5,  # Original value
+    "cv_folds": 3,  # Reduced from 5 for faster training
 }
 
 # Hyperparameter Optimization
@@ -235,7 +235,7 @@ CUDA_DEVICE_COUNT = torch.cuda.device_count() if USE_CUDA else 0
 GPU_CONFIG = {
     "device": DEVICE,
     "use_cuda": USE_CUDA,
-    "num_workers": 0,  # DataLoader workers (0 to save RAM)
+    "num_workers": 2,  # DataLoader workers for prefetching
     "pin_memory": USE_CUDA,  # Pin memory for faster GPU transfer
     # Use AMP (Automatic Mixed Precision) for faster training
     "mixed_precision": USE_CUDA,

@@ -192,6 +192,12 @@ class LSTMSequenceModel:
             dropout=dropout,
         ).to(self.device)
 
+        # Enable multi-GPU training if available
+        if torch.cuda.device_count() > 1:
+            logger.info(
+                f"Using {torch.cuda.device_count()} GPUs via DataParallel")
+            self.model = nn.DataParallel(self.model)
+
         # Mixed precision training (for faster GPU training)
         self.use_amp = GPU_CONFIG['mixed_precision']
         self.scaler_amp = GradScaler('cuda') if self.use_amp else None
@@ -334,8 +340,10 @@ class LSTMSequenceModel:
             train_dataset,
             batch_size=self.batch_size,
             shuffle=True,
-            num_workers=0,  # Disable multiprocessing to save memory
-            pin_memory=False,  # Disable pinned memory to save host RAM
+            num_workers=GPU_CONFIG['num_workers'],  # Prefetch data to GPU
+            pin_memory=GPU_CONFIG['pin_memory'],  # Faster GPU transfer
+            # Keep workers alive
+            persistent_workers=GPU_CONFIG['num_workers'] > 0,
         )
 
         # Initialize histories for diagnostics
