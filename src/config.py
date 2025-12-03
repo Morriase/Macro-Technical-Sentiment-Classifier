@@ -15,6 +15,10 @@ load_dotenv(PROJECT_ROOT / ".env")
 # Detect if running on Kaggle
 IS_KAGGLE = os.path.exists('/kaggle/input')
 
+# LSTM toggle: disable on Kaggle to save RAM and avoid bad val metrics
+# Set to True locally for full hybrid ensemble
+USE_LSTM = not IS_KAGGLE
+
 if IS_KAGGLE:
     # Kaggle paths - updated dataset location
     DATA_DIR = Path("/kaggle/input/macros-and-ohlc")
@@ -168,8 +172,8 @@ WFO_CONFIG = {
 
 # Hyperparameter Optimization
 OPTUNA_CONFIG = {
-    # Reduced from 8 for faster training (each trial takes ~45min)
-    "n_trials": 5,
+    # Reduced to 2 for Kaggle RAM/time; set to 5+ locally
+    "n_trials": 2 if IS_KAGGLE else 5,
     "timeout": 3600,  # 1 hour
     "n_jobs": 1,
     "optimization_metric": "profit_factor",  # or "sharpe_ratio"

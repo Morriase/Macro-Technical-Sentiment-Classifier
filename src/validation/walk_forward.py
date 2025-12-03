@@ -191,21 +191,15 @@ class WalkForwardOptimizer:
         xgb_params = {
             "objective": "multi:softprob",
             "num_class": 3,
-            "learning_rate": trial.suggest_float("learning_rate", 0.001, 0.1, log=True),
-            # Reduced max depth
-            "max_depth": trial.suggest_int("max_depth", 3, 6),
-            # Reduced for memory
-            "n_estimators": trial.suggest_int("n_estimators", 50, 200),
-            # More randomness
-            "subsample": trial.suggest_float("subsample", 0.6, 0.9),
-            "colsample_bytree": trial.suggest_float("colsample_bytree", 0.6, 0.9),
-            # Increased min child weight
-            "min_child_weight": trial.suggest_int("min_child_weight", 3, 10),
-            "gamma": trial.suggest_float("gamma", 0.1, 1.0),  # Increased gamma
-            # Increased L1
-            "reg_alpha": trial.suggest_float("reg_alpha", 0.1, 1.0),
-            # Increased L2
-            "reg_lambda": trial.suggest_float("reg_lambda", 1.0, 5.0),
+            "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.15, log=True),
+            "max_depth": trial.suggest_int("max_depth", 4, 8),
+            "n_estimators": trial.suggest_int("n_estimators", 100, 300),
+            "subsample": trial.suggest_float("subsample", 0.7, 0.95),
+            "colsample_bytree": trial.suggest_float("colsample_bytree", 0.7, 0.95),
+            "min_child_weight": trial.suggest_int("min_child_weight", 1, 5),
+            "gamma": trial.suggest_float("gamma", 0.0, 0.3),
+            "reg_alpha": trial.suggest_float("reg_alpha", 0.0, 0.3),
+            "reg_lambda": trial.suggest_float("reg_lambda", 0.5, 2.0),
             "random_state": self.splitter.min_train_samples,
             # GPU acceleration (use 'hist' with device='cuda' for XGBoost 2.0+)
             "tree_method": "hist",

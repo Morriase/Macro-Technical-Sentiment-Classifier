@@ -5,7 +5,7 @@ Architecture from required.txt:
 - Level-1: XGBoost Meta-Classifier (combines base learner outputs)
 """
 from src.models.lstm_model import LSTMSequenceModel
-from src.config import ENSEMBLE_CONFIG
+from src.config import ENSEMBLE_CONFIG, USE_LSTM, IS_KAGGLE
 from loguru import logger
 from typing import Dict, List, Tuple, Optional
 import joblib
@@ -50,20 +50,20 @@ class HybridEnsemble:
         self.random_state = random_state
 
         # Base Learner 1: XGBoost for tabular features
-        # NOTE: Defaults below are a **low‑memory, regularized** profile tuned for Kaggle.
+        # NOTE: Defaults below are tuned for Kaggle (moderate regularization).
         # You can override by passing xgb_params when constructing HybridEnsemble.
         self.xgb_params = xgb_params or {
             "objective": "multi:softprob",
             "num_class": 3,
-            "max_depth": 4,          # shallower trees to cut RAM + overfitting
+            "max_depth": 6,
             "learning_rate": 0.05,
-            "n_estimators": 200,     # fewer trees for faster, lighter training
-            "subsample": 0.7,
-            "colsample_bytree": 0.7,
-            "min_child_weight": 4,
-            "gamma": 0.3,
-            "reg_alpha": 0.8,
-            "reg_lambda": 3.0,
+            "n_estimators": 200,
+            "subsample": 0.8,
+            "colsample_bytree": 0.8,
+            "min_child_weight": 2,
+            "gamma": 0.1,
+            "reg_alpha": 0.1,
+            "reg_lambda": 1.0,
             "scale_pos_weight": 1.0,
             "eval_metric": "mlogloss",
             "random_state": random_state,
@@ -343,33 +343,43 @@ class HybridEnsemble:
                 verbose=50,
             )
 
-            logger.info("Training LSTM base learner...")
-            self.lstm_base = LSTMSequenceModel(
-                input_size=X_scaled.shape[1], **self.lstm_params
-            )
-            self.lstm_base.fit(
-                X_train_base,
-                y_train_base,
-                X_holdout[:5000],
-                y_holdout[:5000],
-                save_plots_path=save_plots_path,
-            )
+            # LSTM training (skip on Kaggle to save RAM)
+            if USE_LSTM:
+                logger.info("Training LSTM base learner...")
+                self.lstm_base = LSTMSequenceModel(
+                    input_size=X_scaled.shape[1], **self.lstm_params
+                )
+                self.lstm_base.fit(
+                    X_train_base,
+                    y_train_base,
+                    X_holdout[:5000],
+                    y_holdout[:5000],
+                    save_plots_path=save_plots_path,
+                )
+            else:
+                logger.info("Skipping LSTM (USE_LSTM=False for Kaggle RAM)")
+                self.lstm_base = None
 
             # Generate meta-features from holdout predictions
             logger.info("Generating meta-features from holdout set...")
             xgb_holdout_proba = self._xgb_predict_proba(
                 self.xgb_base, X_holdout)
-            lstm_holdout_proba = self.lstm_base.predict_proba(X_holdout)
 
-            # Handle LSTM sequence offset
-            if len(lstm_holdout_proba) < len(xgb_holdout_proba):
-                n_missing = len(xgb_holdout_proba) - len(lstm_holdout_proba)
-                uniform_proba = np.full(
-                    (n_missing, 3), 1.0/3, dtype=np.float32)
-                lstm_holdout_proba = np.vstack(
-                    [uniform_proba, lstm_holdout_proba])
-
-            meta_features = np.hstack([xgb_holdout_proba, lstm_holdout_proba])
+            if USE_LSTM and self.lstm_base is not None:
+                lstm_holdout_proba = self.lstm_base.predict_proba(X_holdout)
+                # Handle LSTM sequence offset
+                if len(lstm_holdout_proba) < len(xgb_holdout_proba):
+                    n_missing = len(xgb_holdout_proba) - \
+                        len(lstm_holdout_proba)
+                    uniform_proba = np.full(
+                        (n_missing, 3), 1.0/3, dtype=np.float32)
+                    lstm_holdout_proba = np.vstack(
+                        [uniform_proba, lstm_holdout_proba])
+                meta_features = np.hstack(
+                    [xgb_holdout_proba, lstm_holdout_proba])
+            else:
+                # XGBoost-only: meta-features are just XGBoost probabilities
+                meta_features = xgb_holdout_proba
 
             # Train meta-classifier
             logger.info("Training meta-classifier...")
@@ -430,18 +440,22 @@ class HybridEnsemble:
 
         # Get base learner predictions (use helper for GPU-compatible XGBoost)
         xgb_proba = self._xgb_predict_proba(self.xgb_base, X_scaled)
-        lstm_proba = self.lstm_base.predict_proba(X_scaled)
 
-        # Handle LSTM sequence length mismatch (drops first sequence_length-1 samples)
-        if len(lstm_proba) < len(xgb_proba):
-            n_missing = len(xgb_proba) - len(lstm_proba)
-            n_classes = lstm_proba.shape[1]
-            # Pad with uniform probabilities for missing samples
-            uniform_proba = np.full((n_missing, n_classes), 1.0 / n_classes)
-            lstm_proba = np.vstack([uniform_proba, lstm_proba])
-
-        # Concatenate for meta-learner
-        meta_features = np.hstack([xgb_proba, lstm_proba])
+        if self.lstm_base is not None:
+            lstm_proba = self.lstm_base.predict_proba(X_scaled)
+            # Handle LSTM sequence length mismatch (drops first sequence_length-1 samples)
+            if len(lstm_proba) < len(xgb_proba):
+                n_missing = len(xgb_proba) - len(lstm_proba)
+                n_classes = lstm_proba.shape[1]
+                # Pad with uniform probabilities for missing samples
+                uniform_proba = np.full(
+                    (n_missing, n_classes), 1.0 / n_classes)
+                lstm_proba = np.vstack([uniform_proba, lstm_proba])
+            # Concatenate for meta-learner
+            meta_features = np.hstack([xgb_proba, lstm_proba])
+        else:
+            # XGBoost-only mode
+            meta_features = xgb_proba
 
         # Meta-classifier prediction (use helper for GPU-compatible XGBoost)
         final_proba = self._xgb_predict_proba(
@@ -497,7 +511,8 @@ class HybridEnsemble:
 
         # Save base learners
         joblib.dump(self.xgb_base, f"{filepath}_xgb_base.pkl")
-        self.lstm_base.save_model(f"{filepath}_lstm_base.pth")
+        if self.lstm_base is not None:
+            self.lstm_base.save_model(f"{filepath}_lstm_base.pth")
 
         # Save meta-classifier
         joblib.dump(self.meta_classifier, f"{filepath}_meta.pkl")
@@ -544,13 +559,17 @@ class HybridEnsemble:
         # Load base learners
         self.xgb_base = joblib.load(f"{filepath}_xgb_base.pkl")
 
-        # Initialize LSTM and load weights
-        # Input size is inferred from XGBoost
-        input_size = self.xgb_base.n_features_in_
-        self.lstm_base = LSTMSequenceModel(
-            input_size=input_size, **self.lstm_params
-        )
-        self.lstm_base.load_model(f"{filepath}_lstm_base.pth")
+        # Initialize LSTM and load weights (if LSTM was used during training)
+        lstm_path = Path(f"{filepath}_lstm_base.pth")
+        if lstm_path.exists():
+            input_size = self.xgb_base.n_features_in_
+            self.lstm_base = LSTMSequenceModel(
+                input_size=input_size, **self.lstm_params
+            )
+            self.lstm_base.load_model(str(lstm_path))
+        else:
+            self.lstm_base = None
+            logger.info("No LSTM model found - using XGBoost-only mode")
 
         # Load meta-classifier
         self.meta_classifier = joblib.load(f"{filepath}_meta.pkl")
