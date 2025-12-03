@@ -354,8 +354,8 @@ class LSTMSequenceModel:
 
         # Loss and optimizer with L2 regularization
         # Note: class weights were too aggressive (dropped val_acc to 23%)
-        # Label smoothing alone is sufficient for this imbalance (23/23/53%)
-        criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
+        # Label smoothing prevents overconfident predictions (0.15 for stronger regularization)
+        criterion = nn.CrossEntropyLoss(label_smoothing=0.15)
 
         # Use instance regularization parameters
         l1_lambda = self.l1_lambda

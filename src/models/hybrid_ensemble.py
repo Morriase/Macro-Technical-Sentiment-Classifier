@@ -273,6 +273,7 @@ class HybridEnsemble:
         """
         # logger.info("Training Hybrid Ensemble")
         # logger.info(f"Training samples: {len(X)}, Features: {X.shape[1]}")
+        logger.info(f"Hybrid Ensemble fit: X.shape={X.shape}, y.shape={y.shape}")
 
         # Store feature metadata (CRITICAL for inference server validation)
         self.n_features_ = X.shape[1]
@@ -291,12 +292,21 @@ class HybridEnsemble:
         if len(X) > max_samples_for_oof:
             logger.info(
                 f"Dataset too large ({len(X):,} samples) for OOF - using simple split")
+            
+            # CRITICAL: Add gap between train/val to prevent LSTM sequence leakage
+            # LSTM uses sequence_length lookback, so we need a gap to prevent
+            # validation sequences from overlapping with training data
+            seq_length = self.lstm_params.get('sequence_length', 22)
+            gap = seq_length * 2  # Double the sequence length for safety
+            
             # Use last 20% as holdout for meta-learner training
             split_idx = int(len(X_scaled) * 0.8)
-            X_train_base = X_scaled[:split_idx]
-            y_train_base = y[:split_idx]
-            X_holdout = X_scaled[split_idx:]
+            X_train_base = X_scaled[:split_idx - gap]  # Leave gap before split
+            y_train_base = y[:split_idx - gap]
+            X_holdout = X_scaled[split_idx:]  # Holdout starts after gap
             y_holdout = y[split_idx:]
+            
+            logger.info(f"  Train/Val gap: {gap} samples (prevents LSTM sequence leakage)")
 
             # Subsample if still too large
             max_train = 30000

@@ -127,7 +127,7 @@ ENSEMBLE_CONFIG = {
             "sequence_length": 22,  # ~1 month of trading days
             "hidden_size": 64,  # Reduced for memory
             "num_layers": 2,
-            "dropout": 0.5,
+            "dropout": 0.6,  # Increased from 0.5 - combat overfitting
             "learning_rate": 0.00025,
             "batch_size": 128,  # Reduced for memory
             "epochs": 50,  # Reduced - early stopping will kick in
@@ -135,8 +135,8 @@ ENSEMBLE_CONFIG = {
             # Regularization (L2 only for now - simpler and effective)
             # L1 disabled (can enable later for feature selection)
             "l1_lambda": 0.0,
-            # Reduced from 1.5e-3 (slightly less aggressive)
-            "l2_lambda": 1.2e-3,
+            # Increased from 1.2e-3 - stronger regularization
+            "l2_lambda": 2.5e-3,
             # Optimizer momentum (Adam parameters)
             "beta1": 0.9,  # Momentum coefficient (default 0.9)
             "beta2": 0.999,  # RMSprop coefficient (default 0.999)
