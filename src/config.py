@@ -124,17 +124,14 @@ ENSEMBLE_CONFIG = {
             "random_state": 42,
         },
         "lstm": {
-            "sequence_length": 22,  # ~1 month of trading days
-            # Slightly increased from 64 for better capacity (some folds underfit)
-            "hidden_size": 72,
-            "num_layers": 2,
-            # Reduced from 0.55 (was too aggressive, causing inconsistency)
-            "dropout": 0.5,
-            "learning_rate": 0.00025,  # Reduced from 0.0003 for smoother convergence
-            # Increased from 128 for more stable gradients (less spiking)
-            "batch_size": 256,
-            "epochs": 100,
-            "early_stopping_patience": 10,  # Increased from 8 for more consistent convergence
+            "sequence_length": 10,  # Reduced from 22 for memory savings
+            "hidden_size": 32,  # Reduced from 72 for memory savings
+            "num_layers": 1,  # Reduced from 2 for memory savings
+            "dropout": 0.3,  # Reduced dropout for smaller network
+            "learning_rate": 0.001,  # Increased for faster convergence with smaller model
+            "batch_size": 64,  # Reduced from 256 for memory savings
+            "epochs": 30,  # Reduced from 100 (smaller model converges faster)
+            "early_stopping_patience": 5,  # Reduced for faster training
             # Regularization (L2 only for now - simpler and effective)
             # L1 disabled (can enable later for feature selection)
             "l1_lambda": 0.0,
@@ -167,16 +164,15 @@ WFO_CONFIG = {
     "test_window_months": 2,  # Out-of-sample period
     "step_months": 2,  # Rolling step size
     "min_train_samples": 3000,  # Reduced from 5000 for shorter windows
-    # Reduced from 5 for faster training (was causing 4hr+ training)
-    "cv_folds": 3,
+    "cv_folds": 2,  # Reduced from 3 for major memory savings in OOF
 }
 
 # Hyperparameter Optimization
 OPTUNA_CONFIG = {
-    # Reduced for Kaggle memory constraints (Tesla T4 = 16GB)
-    "n_trials": 3,  # Reduced from 5 to save memory
+    # Reduced from 8 for faster training (each trial takes ~45min)
+    "n_trials": 5,
     "timeout": 3600,  # 1 hour
-    "n_jobs": 1,  # Sequential to avoid OOM (was -1 = parallel)
+    "n_jobs": -1,
     "optimization_metric": "profit_factor",  # or "sharpe_ratio"
 }
 

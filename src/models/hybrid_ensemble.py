@@ -125,6 +125,7 @@ class HybridEnsemble:
         """
         Generate out-of-fold predictions from base learners
         Prevents data leakage to meta-learner
+        MEMORY OPTIMIZED: Process one model at a time, aggressive cleanup
 
         Args:
             X: Features (n_samples, n_features)
@@ -134,85 +135,76 @@ class HybridEnsemble:
             Tuple of (xgb_oof_proba, lstm_oof_proba)
             Each has shape (n_samples, n_classes)
         """
-        # logger.info(f"Generating OOF predictions with {self.n_folds} folds")
+        import gc
+        import torch
 
         n_samples, n_features = X.shape
         n_classes = 3
 
         # Initialize OOF prediction arrays
-        xgb_oof_proba = np.zeros((n_samples, n_classes))
-        lstm_oof_proba = np.zeros((n_samples, n_classes))
+        xgb_oof_proba = np.zeros((n_samples, n_classes), dtype=np.float32)
+        lstm_oof_proba = np.zeros((n_samples, n_classes), dtype=np.float32)
 
-        # CRITICAL: Use Time Series Split instead of StratifiedKFold
-        # TimeSeriesSplit respects temporal ordering (no shuffle!)
-        # This prevents data leakage and aligns with Walk-Forward Validation spec
-        # StratifiedKFold was causing overfitting by training on future data
         from sklearn.model_selection import TimeSeriesSplit
         tscv = TimeSeriesSplit(n_splits=self.n_folds)
 
-        # logger.info(f"Generating OOF predictions with {self.n_folds} folds...")
         for fold_idx, (train_idx, val_idx) in enumerate(tscv.split(X)):
-            # Only log first and last fold to reduce clutter
-            if fold_idx == 0 or (fold_idx + 1) == self.n_folds:
-                logger.info(
-                    f"OOF prediction on fold {fold_idx + 1}/{self.n_folds}")
+            logger.info(f"OOF fold {fold_idx + 1}/{self.n_folds}")
 
-            X_train_fold = X[train_idx]
+            # Use float32 views to reduce memory
+            X_train_fold = X[train_idx].astype(np.float32)
             y_train_fold = y[train_idx]
-            X_val_fold = X[val_idx]
+            X_val_fold = X[val_idx].astype(np.float32)
 
-            # Compute sample weights for this fold
+            # ===== XGBoost FIRST (then delete) =====
             from sklearn.utils.class_weight import compute_sample_weight
             fold_sample_weights = compute_sample_weight(
-                class_weight={0: 3.0, 1: 3.0, 2: 1.0},  # BUY=0, SELL=1, HOLD=2
+                class_weight={0: 3.0, 1: 3.0, 2: 1.0},
                 y=y_train_fold
             )
 
-            # XGBoost base learner
             xgb_fold = xgb.XGBClassifier(**self.xgb_params)
             xgb_fold.fit(
-                X_train_fold,
-                y_train_fold,
+                X_train_fold, y_train_fold,
                 sample_weight=fold_sample_weights,
                 eval_set=[(X_val_fold, y[val_idx])],
                 verbose=False,
             )
-            xgb_oof_proba[val_idx] = xgb_fold.predict_proba(X_val_fold)
+            xgb_oof_proba[val_idx] = xgb_fold.predict_proba(
+                X_val_fold).astype(np.float32)
 
-            # LSTM base learner
-            lstm_fold = LSTMSequenceModel(
-                input_size=n_features, **self.lstm_params
-            )
-            lstm_fold.fit(X_train_fold, y_train_fold, X_val_fold, y[val_idx])
-
-            # LSTM requires sequence length, so it returns fewer predictions
-            # (drops first sequence_length-1 samples)
-            lstm_proba_fold = lstm_fold.predict_proba(X_val_fold)
-
-            # Handle shape mismatch: LSTM drops first sequence_length-1 samples
-            seq_len = self.lstm_params.get("sequence_length", 22)
-            if len(lstm_proba_fold) < len(val_idx):
-                # Pad with uniform probabilities for first few samples
-                n_missing = len(val_idx) - len(lstm_proba_fold)
-                uniform_proba = np.full(
-                    (n_missing, lstm_proba_fold.shape[1]), 1.0 / lstm_proba_fold.shape[1])
-                lstm_proba_fold = np.vstack([uniform_proba, lstm_proba_fold])
-
-            lstm_oof_proba[val_idx] = lstm_proba_fold
-
-            # Only log first and last fold
-            if fold_idx == 0 or (fold_idx + 1) == self.n_folds:
-                logger.info(f"Fold {fold_idx + 1}/{self.n_folds} completed")
-
-            # Clean up memory after each fold
-            del xgb_fold, lstm_fold, X_train_fold, y_train_fold, X_val_fold, fold_sample_weights
-            import gc
-            import torch
+            # DELETE XGBoost immediately
+            del xgb_fold, fold_sample_weights
             gc.collect()
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
 
-        # logger.info("OOF predictions generation completed")
+            # ===== LSTM SECOND (then delete) =====
+            lstm_fold = LSTMSequenceModel(
+                input_size=n_features, **self.lstm_params
+            )
+            lstm_fold.fit(X_train_fold, y_train_fold, X_val_fold, y[val_idx])
+            lstm_proba_fold = lstm_fold.predict_proba(X_val_fold)
+
+            # Handle shape mismatch
+            seq_len = self.lstm_params.get("sequence_length", 10)
+            if len(lstm_proba_fold) < len(val_idx):
+                n_missing = len(val_idx) - len(lstm_proba_fold)
+                uniform_proba = np.full(
+                    (n_missing, lstm_proba_fold.shape[1]), 1.0 / lstm_proba_fold.shape[1], dtype=np.float32)
+                lstm_proba_fold = np.vstack([uniform_proba, lstm_proba_fold])
+
+            lstm_oof_proba[val_idx] = lstm_proba_fold.astype(np.float32)
+
+            # DELETE LSTM and fold data immediately
+            del lstm_fold, lstm_proba_fold
+            del X_train_fold, y_train_fold, X_val_fold
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+            logger.info(f"Fold {fold_idx + 1} completed, memory cleared")
+
         return xgb_oof_proba, lstm_oof_proba
 
     def fit(

@@ -539,7 +539,7 @@ class LSTMSequenceModel:
 
     def predict_proba(self, X: np.ndarray) -> np.ndarray:
         """
-        Predict class probabilities
+        Predict class probabilities (memory optimized with batching)
 
         Args:
             X: Features array (n_samples, n_features)
@@ -547,24 +547,35 @@ class LSTMSequenceModel:
         Returns:
             Probability array (n_samples, n_classes)
         """
+        import gc
+
         if not self.is_fitted:
             raise ValueError("Model not fitted. Call fit() first.")
 
         # Normalize features
-        X_scaled = self.scaler.transform(X)
+        X_scaled = self.scaler.transform(X).astype(np.float32)
 
         # Prepare sequences
         X_seq, _ = self.prepare_sequences(X_scaled)
+        del X_scaled
+        gc.collect()
 
-        # Convert to tensor
-        X_tensor = torch.FloatTensor(X_seq).to(self.device)
-
-        # Predict
+        # Predict in batches to avoid OOM
         self.model.eval()
-        with torch.no_grad():
-            probs = self.model.predict_proba(X_tensor)
+        batch_size = 512
+        all_probs = []
 
-        return probs.cpu().numpy()
+        with torch.no_grad():
+            for i in range(0, len(X_seq), batch_size):
+                batch = torch.FloatTensor(
+                    X_seq[i:i+batch_size]).to(self.device)
+                probs = self.model.predict_proba(batch)
+                all_probs.append(probs.cpu().numpy().astype(np.float32))
+                del batch, probs
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+
+        return np.vstack(all_probs)
 
     def predict(self, X: np.ndarray) -> np.ndarray:
         """
