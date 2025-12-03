@@ -204,6 +204,14 @@ class HybridEnsemble:
             if fold_idx == 0 or (fold_idx + 1) == self.n_folds:
                 logger.info(f"Fold {fold_idx + 1}/{self.n_folds} completed")
 
+            # Clean up memory after each fold
+            del xgb_fold, lstm_fold, X_train_fold, y_train_fold, X_val_fold, fold_sample_weights
+            import gc
+            import torch
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
         # logger.info("OOF predictions generation completed")
         return xgb_oof_proba, lstm_oof_proba
 

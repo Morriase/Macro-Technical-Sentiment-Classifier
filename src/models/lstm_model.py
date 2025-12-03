@@ -216,6 +216,7 @@ class LSTMSequenceModel:
     ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
         """
         Transform 2D tabular data into 3D sequences for LSTM
+        Optimized for memory using stride tricks
 
         Args:
             X: Features array (n_samples, n_features)
@@ -227,19 +228,25 @@ class LSTMSequenceModel:
         """
         n_samples, n_features = X.shape
 
-        # Create sequences
-        X_sequences = []
-        y_sequences = [] if y is not None else None
+        # Use stride_tricks to avoid memory duplication during sequence creation
+        from numpy.lib.stride_tricks import sliding_window_view
 
-        for i in range(self.sequence_length, n_samples + 1):
-            X_sequences.append(X[i - self.sequence_length:i])
-            if y is not None:
-                y_sequences.append(y[i - 1])  # Use label of last timestep
+        # Create sliding window view
+        # Shape: (n_windows, n_features, window_size)
+        windows = sliding_window_view(
+            X, window_shape=self.sequence_length, axis=0)
 
-        X_sequences = np.array(X_sequences)
+        # Transpose to get (n_windows, window_size, n_features)
+        # This creates a view, not a copy
+        X_sequences = windows.transpose(0, 2, 1)
 
+        # Handle targets
         if y is not None:
-            y_sequences = np.array(y_sequences)
+            # We want the target at the end of each sequence
+            # y is (n_samples,)
+            # We want y corresponding to the last step of each window
+            # The windows end at indices: sequence_length-1, sequence_length, ...
+            y_sequences = y[self.sequence_length-1:]
             return X_sequences, y_sequences
 
         return X_sequences, None
@@ -283,17 +290,26 @@ class LSTMSequenceModel:
         else:
             X_val_tensor = None
             y_val_tensor = None
-        
-        # Create DataLoader for efficient batching and parallel data loading
+
+        # Create DataLoader for efficient batching
         from torch.utils.data import TensorDataset, DataLoader
+        import gc
+
+        # Create dataset
         train_dataset = TensorDataset(X_train_tensor, y_train_tensor)
+
+        # Clean up intermediate arrays to free memory
+        del X_seq, y_seq, X_train_tensor, y_train_tensor
+        if X_val is not None:
+            del X_val_seq, y_val_seq, X_val_tensor, y_val_tensor
+        gc.collect()
+
         train_loader = DataLoader(
             train_dataset,
             batch_size=self.batch_size,
             shuffle=True,
-            num_workers=2,  # Parallel data loading (reduce CPU bottleneck)
+            num_workers=0,  # Disable multiprocessing to save memory
             pin_memory=True,  # Faster GPU transfer
-            persistent_workers=True  # Keep workers alive between epochs
         )
 
         # Initialize histories for diagnostics
@@ -306,25 +322,26 @@ class LSTMSequenceModel:
         # Note: class weights were too aggressive (dropped val_acc to 23%)
         # Label smoothing alone is sufficient for this imbalance (23/23/53%)
         criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
-        
+
         # Use instance regularization parameters
         l1_lambda = self.l1_lambda
         l2_lambda = self.l2_lambda
         beta1 = self.beta1
         beta2 = self.beta2
-        
+
         # Adam optimizer with L2 regularization (weight_decay) and custom momentum
         optimizer = optim.Adam(
             self.model.parameters(),
             lr=self.learning_rate,
             betas=(beta1, beta2),  # Momentum parameters
-            weight_decay=l2_lambda  # L2 regularization (reduced from 2e-3 to 1e-3)
+            # L2 regularization (reduced from 2e-3 to 1e-3)
+            weight_decay=l2_lambda
         )
-        
+
         # Learning rate scheduler - cosine annealing for smoother convergence
         # Reduces LR gradually from initial to min_lr over T_max epochs
         scheduler = optim.lr_scheduler.CosineAnnealingLR(
-            optimizer, 
+            optimizer,
             T_max=self.epochs,  # Full training duration
             eta_min=self.learning_rate * 0.01  # Min LR = 1% of initial
         )
@@ -350,12 +367,13 @@ class LSTMSequenceModel:
                     with autocast('cuda'):
                         outputs = self.model(X_batch)
                         loss = criterion(outputs, y_batch)
-                        
+
                         # Add L1 regularization (Lasso) manually
                         if l1_lambda > 0:
-                            l1_penalty = sum(p.abs().sum() for p in self.model.parameters())
+                            l1_penalty = sum(p.abs().sum()
+                                             for p in self.model.parameters())
                             loss = loss + l1_lambda * l1_penalty
-                    
+
                     # Scale loss for gradient accumulation
                     loss = loss / self.gradient_accumulation_steps
                     # Backward pass with scaled gradients
@@ -365,8 +383,9 @@ class LSTMSequenceModel:
                     if (batch_idx + 1) % self.gradient_accumulation_steps == 0:
                         # Unscale gradients and clip them
                         self.scaler_amp.unscale_(optimizer)
-                        torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
-                        
+                        torch.nn.utils.clip_grad_norm_(
+                            self.model.parameters(), max_norm=1.0)
+
                         self.scaler_amp.step(optimizer)
                         self.scaler_amp.update()
                         optimizer.zero_grad()
@@ -374,18 +393,20 @@ class LSTMSequenceModel:
                     # Standard training without AMP
                     outputs = self.model(X_batch)
                     loss = criterion(outputs, y_batch)
-                    
+
                     # Add L1 regularization (Lasso) manually
                     if l1_lambda > 0:
-                        l1_penalty = sum(p.abs().sum() for p in self.model.parameters())
+                        l1_penalty = sum(p.abs().sum()
+                                         for p in self.model.parameters())
                         loss = loss + l1_lambda * l1_penalty
-                    
+
                     loss = loss / self.gradient_accumulation_steps
                     loss.backward()
 
                     if (batch_idx + 1) % self.gradient_accumulation_steps == 0:
                         # Clip gradients to prevent exploding gradients
-                        torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+                        torch.nn.utils.clip_grad_norm_(
+                            self.model.parameters(), max_norm=1.0)
                         optimizer.step()
                         optimizer.zero_grad()
 
@@ -422,7 +443,7 @@ class LSTMSequenceModel:
                     # Move validation data to GPU
                     X_val_gpu = X_val_tensor.to(self.device)
                     y_val_gpu = y_val_tensor.to(self.device)
-                    
+
                     val_outputs = self.model(X_val_gpu)
                     val_loss = criterion(val_outputs, y_val_gpu).item()
                     val_preds = torch.argmax(val_outputs, dim=1)
@@ -431,7 +452,7 @@ class LSTMSequenceModel:
                 # Record validation metrics
                 self.val_losses.append(val_loss)
                 self.val_accs.append(val_acc)
-                
+
                 # Step the learning rate scheduler (CosineAnnealing steps every epoch)
                 scheduler.step()
 
@@ -452,7 +473,7 @@ class LSTMSequenceModel:
                 if val_acc > best_val_acc:
                     best_val_acc = val_acc
                     improved = True
-                    
+
                 if improved:
                     patience_counter = 0
                 else:
