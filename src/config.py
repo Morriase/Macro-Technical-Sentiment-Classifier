@@ -125,12 +125,12 @@ ENSEMBLE_CONFIG = {
         },
         "lstm": {
             "sequence_length": 22,  # ~1 month of trading days
-            "hidden_size": 128,  # Increased for better GPU utilization
+            "hidden_size": 64,  # Reduced for memory
             "num_layers": 2,
             "dropout": 0.5,
             "learning_rate": 0.00025,
-            "batch_size": 256,  # Balanced for GPU/RAM
-            "epochs": 100,
+            "batch_size": 128,  # Reduced for memory
+            "epochs": 50,  # Reduced - early stopping will kick in
             "early_stopping_patience": 10,
             # Regularization (L2 only for now - simpler and effective)
             # L1 disabled (can enable later for feature selection)

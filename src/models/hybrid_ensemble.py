@@ -76,13 +76,13 @@ class HybridEnsemble:
         # Base Learner 2: LSTM for sequence modeling
         self.lstm_params = lstm_params or {
             "sequence_length": 22,  # ~1 month of trading days
-            "hidden_size": 128,  # Increased for GPU utilization
+            "hidden_size": 64,  # Reduced for memory
             "num_layers": 2,
             "num_classes": 3,
             "dropout": 0.3,
             "learning_rate": 0.001,
-            "batch_size": 256,  # Balanced for GPU/RAM
-            "epochs": 50,  # Reduced from 100 (early stopping will kick in)
+            "batch_size": 128,  # Reduced for memory
+            "epochs": 50,  # Early stopping will kick in
             "early_stopping_patience": 10,
         }
 
@@ -161,9 +161,17 @@ class HybridEnsemble:
 
         for fold_idx, (train_idx, val_idx) in enumerate(tscv.split(X)):
             logger.info(
-                f"OOF fold {fold_idx + 1}/{self.n_folds} - Train: {len(train_idx)} samples, Val: {len(val_idx)} samples")
+                f"OOF fold {fold_idx + 1}/{self.n_folds} - Train: {len(train_idx):,} samples, Val: {len(val_idx):,} samples")
 
-            # Use float32 views to reduce memory
+            # Subsample for memory efficiency on large datasets
+            max_train_samples = 30000  # Limit to prevent OOM
+            if len(train_idx) > max_train_samples:
+                # Take last N samples (most recent data for time series)
+                train_idx = train_idx[-max_train_samples:]
+                logger.info(
+                    f"    Subsampled train to {len(train_idx):,} samples")
+
+            # Use float32 to reduce memory
             X_train_fold = X[train_idx].astype(np.float32)
             y_train_fold = y[train_idx]
             X_val_fold = X[val_idx].astype(np.float32)
@@ -180,9 +188,9 @@ class HybridEnsemble:
             xgb_fold.fit(
                 X_train_fold, y_train_fold,
                 sample_weight=fold_sample_weights,
-                eval_set=[(X_train_fold, y_train_fold),
-                          (X_val_fold, y[val_idx])],
-                verbose=20,  # Log every 20 rounds for OOF folds
+                # Only val set to save memory
+                eval_set=[(X_val_fold, y[val_idx])],
+                verbose=50,  # Log every 50 rounds for OOF folds
             )
             # Use helper for GPU-compatible prediction
             xgb_oof_proba[val_idx] = self._xgb_predict_proba(
