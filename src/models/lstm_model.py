@@ -400,7 +400,7 @@ class LSTMSequenceModel:
         train_loader = DataLoader(
             train_dataset,
             batch_size=self.batch_size,
-            shuffle=True,
+            shuffle=False,  # CRITICAL: Never shuffle time series for LSTM
             num_workers=GPU_CONFIG['num_workers'],  # Prefetch data to GPU
             pin_memory=GPU_CONFIG['pin_memory'],  # Faster GPU transfer
             # Keep workers alive
