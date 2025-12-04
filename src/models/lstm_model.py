@@ -413,11 +413,10 @@ class LSTMSequenceModel:
         self.train_accs = []
         self.val_accs = []
 
-        # CLASS WEIGHTS: Address imbalance (Buy 24%, Sell 23%, Hold 53%)
-        # Expert recommendation: inverse-frequency weights to prevent Hold domination
+        # CLASS WEIGHTS: Address severe imbalance (Buy 13%, Sell 13%, Hold 74%)
+        # Weights ~= inverse frequency: 74/13 ≈ 5.7, using 5.5 for Buy/Sell
         # Class mapping: Buy=0, Sell=1, Hold=2
-        # Upweight minority classes
-        class_weights = torch.tensor([2.0, 2.0, 1.0], device=self.device)
+        class_weights = torch.tensor([5.5, 5.5, 1.0], device=self.device)
 
         # Loss function with class weights and label smoothing
         criterion = nn.CrossEntropyLoss(

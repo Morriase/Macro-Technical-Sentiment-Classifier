@@ -380,9 +380,9 @@ class HybridEnsemble:
             # Train base learners on subsampled data
             logger.info("Training XGBoost base learner...")
             from sklearn.utils.class_weight import compute_sample_weight
-            # Less aggressive class weights to prevent overfitting to minority classes
+            # Strong class weights to match 74/13/13 imbalance (74/13 ≈ 5.7)
             sample_weights = compute_sample_weight(
-                class_weight={0: 2.0, 1: 2.0, 2: 1.0},
+                class_weight={0: 5.5, 1: 5.5, 2: 1.0},
                 y=y_train_base
             )
             self.xgb_base.fit(
