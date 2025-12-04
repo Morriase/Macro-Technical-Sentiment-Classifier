@@ -140,27 +140,27 @@ ENSEMBLE_CONFIG = {
         },
         "lstm": {
             # Architecture - based on senior ML engineer's parameters
-            "sequence_length": 16,      # Keep 16 for M5 data granularity
-            "hidden_size": 64,          # Reduced from 96 (author used 40)
+            "sequence_length": 40,      # Author's optimal historical depth via correlation
+            # Author's exact value (tested 20, 40, 60, 80)
+            "hidden_size": 40,
             "num_layers": 3,            # Deep network for complex patterns
             "bidirectional": False,     # Unidirectional saves 50% LSTM memory
             # Activation - author found Swish accelerates training
             "hidden_activation": "swish",  # Swish > ReLU for hidden layers
             "use_batch_norm": True,     # Author: "effective replacement for pre-normalization"
             # Regularization - author used LIGHTER values
-            "dropout": 0.3,             # Reduced from 0.4 (author's value)
+            "dropout": 0.3,             # Author's value
             "l1_lambda": 1e-7,          # Author's exact value
-            # Author's exact value (10x lighter than before)
-            "l2_lambda": 1e-5,
+            "l2_lambda": 1e-5,          # Author's exact value
             "label_smoothing": 0.1,     # Keep for classification
             # Learning rate - author preferred 3e-4
             "learning_rate": 3e-4,      # Author's preferred rate
             "lr_warmup_epochs": 3,      # Warmup prevents early instability
             "lr_min_factor": 0.01,      # Min LR = 1% of initial
-            # Training schedule - author used much larger batches
-            "batch_size": 5000,         # Author used 1000-10000
+            # Training schedule - smaller batch for stable gradients
+            "batch_size": 1024,         # Reduced from 5000 for stability
             "epochs": 200,              # Author used 500-1000
-            "early_stopping_patience": 5,  # Author's exact value
+            "early_stopping_patience": 15,  # Increased - give model time to learn
             # Optimizer - keep AdamW (better than Adam for weight decay)
             "optimizer": "adamw",
             "beta1": 0.9,               # Author's value
@@ -168,7 +168,7 @@ ENSEMBLE_CONFIG = {
             # Gradient clipping - prevents exploding gradients
             "max_grad_norm": 1.0,       # Relaxed from 0.5
             # Memory optimization - gradient accumulation for large effective batch
-            "gradient_accumulation_steps": 1,  # Not needed with batch_size=5000
+            "gradient_accumulation_steps": 1,
         },
     },
     "meta_learner": {
