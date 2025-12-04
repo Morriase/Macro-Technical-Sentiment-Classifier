@@ -96,3 +96,11 @@ Macro-Technical-Sentiment-Classifier/
 
 # Training progress logs
 resources/training_progress.txt
+
+# NotebookLM MCP server (local only)
+.github/copilot-instructions.md
+chrome_profile_notebooklm/
+mcp_servers/
+notebooklm-config.json
+resources/talk_to_lm.md
+resources/training_parameters.md

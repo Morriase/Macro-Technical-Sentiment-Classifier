@@ -26,18 +26,21 @@ if str(project_root) not in sys.path:
 
 class LSTMSequenceClassifier(nn.Module):
     """
-    Two-layer LSTM network for sequence classification
+    Deep LSTM network for sequence classification
     Captures temporal dependencies in financial time series
+    OPTIMIZED: Swish activation + BatchNorm per senior ML engineer's findings
     """
 
     def __init__(
         self,
         input_size: int,
-        hidden_size: int = 128,
-        num_layers: int = 2,
+        hidden_size: int = 64,
+        num_layers: int = 3,
         num_classes: int = 3,
         dropout: float = 0.3,
         bidirectional: bool = False,
+        use_batch_norm: bool = True,
+        hidden_activation: str = "swish",
     ):
         """
         Initialize LSTM classifier
@@ -49,6 +52,8 @@ class LSTMSequenceClassifier(nn.Module):
             num_classes: Number of output classes (Buy/Sell/Hold)
             dropout: Dropout rate for regularization
             bidirectional: Whether to use bidirectional LSTM
+            use_batch_norm: Whether to use BatchNormalization (stabilizes training)
+            hidden_activation: Activation function for hidden layers ('swish', 'relu', 'tanh')
         """
         super(LSTMSequenceClassifier, self).__init__()
 
@@ -57,6 +62,12 @@ class LSTMSequenceClassifier(nn.Module):
         self.num_layers = num_layers
         self.num_classes = num_classes
         self.bidirectional = bidirectional
+        self.use_batch_norm = use_batch_norm
+        self.hidden_activation = hidden_activation
+
+        # Input BatchNorm - stabilizes training (author's recommendation)
+        if use_batch_norm:
+            self.input_bn = nn.BatchNorm1d(input_size)
 
         # LSTM layers
         self.lstm = nn.LSTM(
@@ -68,11 +79,25 @@ class LSTMSequenceClassifier(nn.Module):
             bidirectional=bidirectional,
         )
 
+        # Post-LSTM BatchNorm
+        fc_input_size = hidden_size * 2 if bidirectional else hidden_size
+        if use_batch_norm:
+            self.lstm_bn = nn.BatchNorm1d(fc_input_size)
+
         # Dropout for regularization
         self.dropout = nn.Dropout(dropout)
 
+        # Hidden activation function - Swish accelerates training (author's finding)
+        if hidden_activation == "swish":
+            self.activation = nn.SiLU()  # SiLU is PyTorch's Swish implementation
+        elif hidden_activation == "relu":
+            self.activation = nn.ReLU()
+        elif hidden_activation == "tanh":
+            self.activation = nn.Tanh()
+        else:
+            self.activation = nn.SiLU()  # Default to Swish
+
         # Fully connected output layer
-        fc_input_size = hidden_size * 2 if bidirectional else hidden_size
         self.fc = nn.Linear(fc_input_size, num_classes)
 
         # Softmax for probabilities
@@ -80,7 +105,7 @@ class LSTMSequenceClassifier(nn.Module):
 
     def forward(self, x, return_hidden=False):
         """
-        Forward pass
+        Forward pass with BatchNorm and Swish activation
 
         Args:
             x: Input tensor of shape (batch_size, sequence_length, input_size)
@@ -89,10 +114,17 @@ class LSTMSequenceClassifier(nn.Module):
         Returns:
             Logits or (logits, hidden_state) if return_hidden=True
         """
+        # Apply input BatchNorm (stabilizes training)
+        if self.use_batch_norm:
+            # BatchNorm1d expects (batch, features), so transpose
+            batch_size, seq_len, features = x.shape
+            x = x.transpose(1, 2)  # (batch, features, seq_len)
+            x = self.input_bn(x)
+            x = x.transpose(1, 2)  # (batch, seq_len, features)
+
         # LSTM forward pass
         # lstm_out shape: (batch_size, seq_length, hidden_size * num_directions)
         # h_n shape: (num_layers * num_directions, batch_size, hidden_size)
-        # c_n shape: (num_layers * num_directions, batch_size, hidden_size)
         lstm_out, (h_n, c_n) = self.lstm(x)
 
         # Get the final hidden state from last layer
@@ -101,6 +133,13 @@ class LSTMSequenceClassifier(nn.Module):
             hidden = torch.cat((h_n[-2], h_n[-1]), dim=1)
         else:
             hidden = h_n[-1]
+
+        # Apply post-LSTM BatchNorm
+        if self.use_batch_norm:
+            hidden = self.lstm_bn(hidden)
+
+        # Apply Swish activation (accelerates training per author)
+        hidden = self.activation(hidden)
 
         # Apply dropout
         hidden = self.dropout(hidden)
@@ -124,41 +163,61 @@ class LSTMSequenceClassifier(nn.Module):
 class LSTMSequenceModel:
     """
     Wrapper for LSTM model with training and prediction utilities
+    OPTIMIZED: Swish activation, BatchNorm, author's parameters
     """
 
     def __init__(
         self,
         input_size: int,
-        sequence_length: int = 22,
-        hidden_size: int = 128,
-        num_layers: int = 2,
+        sequence_length: int = 16,
+        hidden_size: int = 64,
+        num_layers: int = 3,
         num_classes: int = 3,
-        dropout: float = 0.4,  # Increased from 0.3 to prevent overfitting
-        learning_rate: float = 0.001,
-        batch_size: int = 64,
-        epochs: int = 100,
-        early_stopping_patience: int = 10,
+        dropout: float = 0.3,
+        learning_rate: float = 3e-4,
+        batch_size: int = 5000,
+        epochs: int = 200,
+        early_stopping_patience: int = 5,
         device: Optional[str] = None,
-        l1_lambda: float = 1e-5,
-        l2_lambda: float = 3e-3,  # Increased from 2e-3
+        l1_lambda: float = 1e-7,
+        l2_lambda: float = 1e-5,
         beta1: float = 0.9,
         beta2: float = 0.999,
+        label_smoothing: float = 0.1,
+        lr_warmup_epochs: int = 3,
+        lr_min_factor: float = 0.01,
+        max_grad_norm: float = 1.0,
+        gradient_accumulation_steps: int = 1,
+        bidirectional: bool = False,
+        use_batch_norm: bool = True,
+        hidden_activation: str = "swish",
+        **kwargs,  # Accept extra params gracefully
     ):
         """
-        Initialize LSTM sequence model
+        Initialize LSTM sequence model (author's optimized parameters)
 
         Args:
             input_size: Number of features per timestep
-            sequence_length: Look-back window (number of timesteps)
-            hidden_size: LSTM hidden units
-            num_layers: Number of LSTM layers
+            sequence_length: Look-back window (16 for M5 data)
+            hidden_size: LSTM hidden units (64, author used 40)
+            num_layers: Number of LSTM layers (3 for deep learning)
             num_classes: Number of output classes
-            dropout: Dropout rate
-            learning_rate: Learning rate for optimizer
-            batch_size: Training batch size
-            epochs: Maximum training epochs
-            early_stopping_patience: Patience for early stopping
+            dropout: Dropout rate (0.3, author's value)
+            learning_rate: Initial learning rate (3e-4, author's preferred)
+            batch_size: Training batch size (5000, author used 1000-10000)
+            epochs: Maximum training epochs (200, author used 500-1000)
+            early_stopping_patience: Patience for early stopping (5, author's value)
             device: 'cuda', 'cpu', or None (auto-detect)
+            l1_lambda: L1 regularization (1e-7, author's value)
+            l2_lambda: L2 regularization (1e-5, author's value)
+            label_smoothing: Label smoothing factor (0.1)
+            lr_warmup_epochs: Epochs for learning rate warmup
+            lr_min_factor: Minimum LR as fraction of initial
+            max_grad_norm: Gradient clipping norm (1.0)
+            gradient_accumulation_steps: Steps to accumulate gradients
+            bidirectional: Use bidirectional LSTM
+            use_batch_norm: Use BatchNormalization (author's recommendation)
+            hidden_activation: Activation function ('swish' accelerates training)
         """
         self.input_size = input_size
         self.sequence_length = sequence_length
@@ -176,6 +235,16 @@ class LSTMSequenceModel:
         # Optimizer momentum parameters
         self.beta1 = beta1
         self.beta2 = beta2
+        # Training parameters
+        self.label_smoothing = label_smoothing
+        self.lr_warmup_epochs = lr_warmup_epochs
+        self.lr_min_factor = lr_min_factor
+        self.max_grad_norm = max_grad_norm
+        self.gradient_accumulation_steps = gradient_accumulation_steps
+        self.bidirectional = bidirectional
+        # New: BatchNorm and Swish activation
+        self.use_batch_norm = use_batch_norm
+        self.hidden_activation = hidden_activation
 
         # Device - use config or auto-detect
         if device is None:
@@ -183,38 +252,31 @@ class LSTMSequenceModel:
         else:
             self.device = torch.device(device)
 
-        # Initialize model
+        # Initialize model with BatchNorm and Swish
         self.model = LSTMSequenceClassifier(
             input_size=input_size,
             hidden_size=hidden_size,
             num_layers=num_layers,
             num_classes=num_classes,
             dropout=dropout,
+            bidirectional=bidirectional,
+            use_batch_norm=use_batch_norm,
+            hidden_activation=hidden_activation,
         ).to(self.device)
-
-        # Enable multi-GPU training if available.
-        # NOTE: DataParallel can increase memory overhead; on Kaggle a single
-        # T4 is usually enough, so we keep the model on one device by default.
-        # If you really want multi-GPU, wrap the model outside this class.
 
         # Mixed precision training (for faster GPU training)
         self.use_amp = GPU_CONFIG['mixed_precision']
         self.scaler_amp = GradScaler('cuda') if self.use_amp else None
 
-        # Gradient accumulation for larger effective batch size
-        self.gradient_accumulation_steps = GPU_CONFIG['gradient_accumulation_steps']
-
         # Scaler for feature normalization
         self.scaler = MinMaxScaler(feature_range=(0, 1))
         self.is_fitted = False
 
-        # Reduced logging for cleaner output
-        # logger.info(f"LSTM model initialized on {self.device}")
-        # logger.info(f"CUDA available: {USE_CUDA}, Mixed Precision: {self.use_amp}")
-        # logger.info(f"Model parameters: {sum(p.numel() for p in self.model.parameters()):,}")
-        # if USE_CUDA:
-        #     logger.info(f"GPU: {torch.cuda.get_device_name(0)}")
-        #     logger.info(f"CUDA Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
+        # Log model info
+        param_count = sum(p.numel() for p in self.model.parameters())
+        logger.info(f"LSTM initialized: {hidden_size} units × {num_layers} layers, "
+                    f"BatchNorm={use_batch_norm}, Activation={hidden_activation}, "
+                    f"Params={param_count:,}")
 
     def prepare_sequences(
         self, X: np.ndarray, y: Optional[np.ndarray] = None
@@ -351,33 +413,34 @@ class LSTMSequenceModel:
         self.train_accs = []
         self.val_accs = []
 
-        # Loss and optimizer with L2 regularization
-        # Note: class weights were too aggressive (dropped val_acc to 23%)
-        # Label smoothing prevents overconfident predictions (0.15 for stronger regularization)
-        criterion = nn.CrossEntropyLoss(label_smoothing=0.15)
+        # Loss function with configurable label smoothing
+        # Label smoothing prevents overconfident predictions
+        criterion = nn.CrossEntropyLoss(label_smoothing=self.label_smoothing)
 
-        # Use instance regularization parameters
-        l1_lambda = self.l1_lambda
-        l2_lambda = self.l2_lambda
-        beta1 = self.beta1
-        beta2 = self.beta2
-
-        # Adam optimizer with L2 regularization (weight_decay) and custom momentum
-        optimizer = optim.Adam(
+        # Use AdamW optimizer - better weight decay implementation
+        # AdamW decouples weight decay from gradient update (fixes rising loss)
+        optimizer = optim.AdamW(
             self.model.parameters(),
             lr=self.learning_rate,
-            betas=(beta1, beta2),  # Momentum parameters
-            # L2 regularization (reduced from 2e-3 to 1e-3)
-            weight_decay=l2_lambda
+            betas=(self.beta1, self.beta2),
+            weight_decay=self.l2_lambda,
+            eps=1e-8,
         )
 
-        # Learning rate scheduler - cosine annealing for smoother convergence
-        # Reduces LR gradually from initial to min_lr over T_max epochs
-        scheduler = optim.lr_scheduler.CosineAnnealingLR(
-            optimizer,
-            T_max=self.epochs,  # Full training duration
-            eta_min=self.learning_rate * 0.01  # Min LR = 1% of initial
-        )
+        # Learning rate scheduler with warmup to prevent early instability
+        # Phase 1: Linear warmup for lr_warmup_epochs
+        # Phase 2: Cosine annealing decay
+        def lr_lambda(epoch):
+            if epoch < self.lr_warmup_epochs:
+                # Linear warmup from 10% to 100% of learning rate
+                return 0.1 + 0.9 * (epoch / self.lr_warmup_epochs)
+            else:
+                # Cosine annealing after warmup
+                progress = (epoch - self.lr_warmup_epochs) / \
+                    max(1, self.epochs - self.lr_warmup_epochs)
+                return self.lr_min_factor + (1 - self.lr_min_factor) * (1 + np.cos(np.pi * progress)) / 2
+
+        scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
         # Training loop
         best_val_loss = float('inf')
@@ -415,10 +478,10 @@ class LSTMSequenceModel:
                         loss = criterion(outputs, y_batch)
 
                         # Add L1 regularization (Lasso) manually
-                        if l1_lambda > 0:
+                        if self.l1_lambda > 0:
                             l1_penalty = sum(p.abs().sum()
                                              for p in self.model.parameters())
-                            loss = loss + l1_lambda * l1_penalty
+                            loss = loss + self.l1_lambda * l1_penalty
 
                     # Scale loss for gradient accumulation
                     loss = loss / self.gradient_accumulation_steps
@@ -430,7 +493,7 @@ class LSTMSequenceModel:
                         # Unscale gradients and clip them
                         self.scaler_amp.unscale_(optimizer)
                         torch.nn.utils.clip_grad_norm_(
-                            self.model.parameters(), max_norm=1.0)
+                            self.model.parameters(), max_norm=self.max_grad_norm)
 
                         self.scaler_amp.step(optimizer)
                         self.scaler_amp.update()
@@ -441,10 +504,10 @@ class LSTMSequenceModel:
                     loss = criterion(outputs, y_batch)
 
                     # Add L1 regularization (Lasso) manually
-                    if l1_lambda > 0:
+                    if self.l1_lambda > 0:
                         l1_penalty = sum(p.abs().sum()
                                          for p in self.model.parameters())
-                        loss = loss + l1_lambda * l1_penalty
+                        loss = loss + self.l1_lambda * l1_penalty
 
                     loss = loss / self.gradient_accumulation_steps
                     loss.backward()
@@ -452,7 +515,7 @@ class LSTMSequenceModel:
                     if (batch_idx + 1) % self.gradient_accumulation_steps == 0:
                         # Clip gradients to prevent exploding gradients
                         torch.nn.utils.clip_grad_norm_(
-                            self.model.parameters(), max_norm=1.0)
+                            self.model.parameters(), max_norm=self.max_grad_norm)
                         optimizer.step()
                         optimizer.zero_grad()
 

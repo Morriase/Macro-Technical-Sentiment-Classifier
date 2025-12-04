@@ -113,61 +113,94 @@ PCA_VARIANCE_THRESHOLD = 0.95  # Variance to retain in PCA
 VOLATILITY_WINDOWS = [5, 10, 22, 50]  # Windows for realized volatility
 
 # Model Architecture - Stacking Ensemble (XGBoost + LSTM + XGBoost Meta)
+# OPTIMIZED FOR: 30GB RAM, prevent overfitting, stable loss convergence
 ENSEMBLE_CONFIG = {
     "base_learners": {
         "xgboost": {
-            "n_estimators": 300,
-            "max_depth": 6,
-            "learning_rate": 0.05,
-            "subsample": 0.8,
-            "colsample_bytree": 0.8,
-            "min_child_weight": 3,
-            "gamma": 0.1,
-            "reg_alpha": 0.05,
-            "reg_lambda": 1.0,
+            # Tree parameters - conservative for generalization
+            "n_estimators": 500,        # More trees but with early stopping
+            "max_depth": 4,             # Reduced from 6 - prevents overfitting
+            "learning_rate": 0.02,      # Slower learning for stability
+            "min_child_weight": 5,      # Increased - requires more samples per leaf
+            "gamma": 0.2,               # Higher - more conservative splits
+            # Sampling - aggressive subsampling to reduce variance
+            "subsample": 0.7,           # Row sampling per tree
+            "colsample_bytree": 0.7,    # Column sampling per tree
+            "colsample_bylevel": 0.7,   # Column sampling per level
+            # Regularization - strong L1/L2 to prevent overfitting
+            "reg_alpha": 0.3,           # L1 regularization (sparsity)
+            "reg_lambda": 2.0,          # L2 regularization (weight decay)
+            # Training settings
             "random_state": 42,
+            "early_stopping_rounds": 50,  # Stop if no improvement
+            "eval_metric": "mlogloss",
+            # Memory optimization
+            "max_bin": 128,             # Reduce histogram bins (default 256)
+            "tree_method": "hist",      # Histogram-based for memory efficiency
         },
         "lstm": {
-            "sequence_length": 22,  # ~1 month of trading days
-            "hidden_size": 64,  # Reduced for memory
-            "num_layers": 2,
-            "dropout": 0.6,  # Increased from 0.5 - combat overfitting
-            "learning_rate": 0.00025,
-            "batch_size": 128,  # Reduced for memory
-            "epochs": 50,  # Reduced - early stopping will kick in
-            "early_stopping_patience": 10,
-            # Regularization (L2 only for now - simpler and effective)
-            # L1 disabled (can enable later for feature selection)
-            "l1_lambda": 0.0,
-            # Increased from 1.2e-3 - stronger regularization
-            "l2_lambda": 2.5e-3,
-            # Optimizer momentum (Adam parameters)
-            "beta1": 0.9,  # Momentum coefficient (default 0.9)
-            "beta2": 0.999,  # RMSprop coefficient (default 0.999)
+            # Architecture - based on senior ML engineer's parameters
+            "sequence_length": 16,      # Keep 16 for M5 data granularity
+            "hidden_size": 64,          # Reduced from 96 (author used 40)
+            "num_layers": 3,            # Deep network for complex patterns
+            "bidirectional": False,     # Unidirectional saves 50% LSTM memory
+            # Activation - author found Swish accelerates training
+            "hidden_activation": "swish",  # Swish > ReLU for hidden layers
+            "use_batch_norm": True,     # Author: "effective replacement for pre-normalization"
+            # Regularization - author used LIGHTER values
+            "dropout": 0.3,             # Reduced from 0.4 (author's value)
+            "l1_lambda": 1e-7,          # Author's exact value
+            # Author's exact value (10x lighter than before)
+            "l2_lambda": 1e-5,
+            "label_smoothing": 0.1,     # Keep for classification
+            # Learning rate - author preferred 3e-4
+            "learning_rate": 3e-4,      # Author's preferred rate
+            "lr_warmup_epochs": 3,      # Warmup prevents early instability
+            "lr_min_factor": 0.01,      # Min LR = 1% of initial
+            # Training schedule - author used much larger batches
+            "batch_size": 5000,         # Author used 1000-10000
+            "epochs": 200,              # Author used 500-1000
+            "early_stopping_patience": 5,  # Author's exact value
+            # Optimizer - keep AdamW (better than Adam for weight decay)
+            "optimizer": "adamw",
+            "beta1": 0.9,               # Author's value
+            "beta2": 0.999,             # Author's value
+            # Gradient clipping - prevents exploding gradients
+            "max_grad_norm": 1.0,       # Relaxed from 0.5
+            # Memory optimization - gradient accumulation for large effective batch
+            "gradient_accumulation_steps": 1,  # Not needed with batch_size=5000
         },
     },
     "meta_learner": {
-        "type": "xgboost",  # XGBoost meta-classifier
-        "n_estimators": 100,
-        "max_depth": 3,
-        "learning_rate": 0.05,
+        "type": "xgboost",
+        "n_estimators": 150,            # Slightly more for meta learning
+        "max_depth": 3,                 # Shallow - only 6 input features
+        "learning_rate": 0.03,          # Conservative
         "subsample": 0.8,
         "colsample_bytree": 0.8,
-        "reg_alpha": 0.1,
-        "reg_lambda": 1.0,
+        "reg_alpha": 0.2,
+        "reg_lambda": 1.5,
         "random_state": 42,
-        "batch_size": 64,
-        "early_stopping_patience": 10,
+        "early_stopping_rounds": 30,
+    },
+    # Memory management settings
+    "memory": {
+        "max_train_samples": 40000,     # Limit samples for OOF to prevent OOM
+        "max_val_samples": 10000,       # Limit validation samples
+        "use_float32": True,            # Use float32 instead of float64
+        "aggressive_gc": True,          # Garbage collect after each fold
     },
 }
 
 # Walk-Forward Optimization Configuration
+# OPTIMIZED FOR: 30GB RAM with both XGBoost and LSTM training
 WFO_CONFIG = {
-    "train_window_months": 6,
-    "test_window_months": 2,
-    "step_months": 2,
-    "min_train_samples": 3000,
-    "cv_folds": 3,  # Reduced from 5 for faster training
+    "train_window_months": 4,       # Reduced from 6 - less data per fold
+    "test_window_months": 1,        # Reduced from 2 - faster iteration
+    "step_months": 1,               # Smaller steps for more folds
+    "min_train_samples": 2000,      # Reduced minimum
+    "cv_folds": 3,                  # 3 folds for OOF generation
+    "max_samples_per_fold": 35000,  # Hard limit per fold to prevent OOM
 }
 
 # Hyperparameter Optimization
@@ -236,16 +269,20 @@ USE_CUDA = torch.cuda.is_available()
 CUDA_DEVICE_COUNT = torch.cuda.device_count() if USE_CUDA else 0
 
 # GPU Optimization Settings
+# OPTIMIZED FOR: 30GB RAM with aggressive memory management
 GPU_CONFIG = {
     "device": DEVICE,
     "use_cuda": USE_CUDA,
-    "num_workers": 0,  # Disabled - workers duplicate data in RAM
-    "pin_memory": False,  # Disabled to save host RAM
-    # Use AMP (Automatic Mixed Precision) for faster training
+    "num_workers": 0,               # Disabled - workers duplicate data in RAM
+    "pin_memory": False,            # Disabled to save host RAM
+    # Mixed precision - saves 50% GPU memory
     "mixed_precision": USE_CUDA,
-    "cudnn_benchmark": USE_CUDA,  # Enable cuDNN auto-tuner
-    # Effective batch size multiplier
-    "gradient_accumulation_steps": 4 if IS_KAGGLE else 1,
+    "cudnn_benchmark": USE_CUDA,    # Enable cuDNN auto-tuner
+    # Gradient accumulation for memory-efficient large batch training
+    "gradient_accumulation_steps": 4,  # Always use - effective batch = batch_size * 4
+    # Memory limits
+    "max_gpu_memory_fraction": 0.85,   # Reserve 15% for system
+    "empty_cache_frequency": 10,       # Clear cache every N batches
 }
 
 # Set cuDNN optimization flags

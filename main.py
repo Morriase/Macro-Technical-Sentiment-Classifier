@@ -214,12 +214,11 @@ class ForexClassifierPipeline:
             raise ValueError("Price data not loaded. Run fetch_data() first.")
 
         # --- Step 2.1: Base Technical Features on Primary Timeframe ---
+        # OPTIMIZED: ~18 base features (removed redundant Stochastic, BB, CCI, ATR, lags)
         logger.info(
-            "Calculating base technical features on primary timeframe...")
+            "Calculating OPTIMIZED base technical features on primary timeframe...")
         self.df_features = self.tech_engineer.calculate_all_features(
             self.df_price.copy())
-        self.df_features = self.tech_engineer.calculate_feature_crosses(
-            self.df_features)
         logger.success(
             f"✓ Calculated {len(self.df_features.columns)} base features.")
 

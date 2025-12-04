@@ -26,6 +26,7 @@ if str(project_root) not in sys.path:
 class HybridEnsemble:
     """
     Two-level stacking ensemble combining XGBoost and LSTM
+    OPTIMIZED: 30GB RAM, proper regularization, stable training
     """
 
     def __init__(
@@ -33,8 +34,9 @@ class HybridEnsemble:
         xgb_params: Optional[Dict] = None,
         lstm_params: Optional[Dict] = None,
         meta_xgb_params: Optional[Dict] = None,
-        n_folds: int = 3,  # Reduced from 5 for faster OOF generation
+        n_folds: int = 3,
         random_state: int = 42,
+        memory_config: Optional[Dict] = None,
     ):
         """
         Initialize hybrid ensemble
@@ -45,59 +47,80 @@ class HybridEnsemble:
             meta_xgb_params: Meta-classifier XGBoost hyperparameters
             n_folds: Number of folds for OOF predictions
             random_state: Random seed
+            memory_config: Memory management settings
         """
         self.n_folds = n_folds
         self.random_state = random_state
 
+        # Memory management settings
+        self.memory_config = memory_config or ENSEMBLE_CONFIG.get("memory", {
+            "max_train_samples": 40000,
+            "max_val_samples": 10000,
+            "use_float32": True,
+            "aggressive_gc": True,
+        })
+
         # Base Learner 1: XGBoost for tabular features
-        # NOTE: Defaults below are tuned for Kaggle (moderate regularization).
-        # You can override by passing xgb_params when constructing HybridEnsemble.
+        # OPTIMIZED: Conservative parameters to prevent overfitting
+        xgb_config = ENSEMBLE_CONFIG.get(
+            "base_learners", {}).get("xgboost", {})
         self.xgb_params = xgb_params or {
             "objective": "multi:softprob",
             "num_class": 3,
-            "max_depth": 5,
-            "learning_rate": 0.03,
-            "n_estimators": 500,  # Will early stop before this
-            "subsample": 0.8,
-            "colsample_bytree": 0.8,
-            "min_child_weight": 3,
-            "gamma": 0.1,
-            "reg_alpha": 0.1,
-            "reg_lambda": 1.5,
+            "max_depth": xgb_config.get("max_depth", 4),
+            "learning_rate": xgb_config.get("learning_rate", 0.02),
+            "n_estimators": xgb_config.get("n_estimators", 500),
+            "subsample": xgb_config.get("subsample", 0.7),
+            "colsample_bytree": xgb_config.get("colsample_bytree", 0.7),
+            "colsample_bylevel": xgb_config.get("colsample_bylevel", 0.7),
+            "min_child_weight": xgb_config.get("min_child_weight", 5),
+            "gamma": xgb_config.get("gamma", 0.2),
+            "reg_alpha": xgb_config.get("reg_alpha", 0.3),
+            "reg_lambda": xgb_config.get("reg_lambda", 2.0),
+            "max_bin": xgb_config.get("max_bin", 128),
             "scale_pos_weight": 1.0,
             "eval_metric": "mlogloss",
-            "early_stopping_rounds": 30,  # CRITICAL: Stop when val loss increases
+            "early_stopping_rounds": xgb_config.get("early_stopping_rounds", 50),
             "random_state": random_state,
-            # Use GPU for training (XGBoost 2.0+: use 'hist' with device='cuda')
             "tree_method": "hist",
-            "device": "cuda",
-            "n_jobs": 1,  # Must be 1 when using GPU
+            "device": "cuda" if USE_CUDA else "cpu",
+            "n_jobs": 1 if USE_CUDA else -1,
         }
 
         self.xgb_base = xgb.XGBClassifier(**self.xgb_params)
 
         # Base Learner 2: LSTM for sequence modeling
-        # Default profile is intentionally compact for Kaggle (~16‑step window, small hidden size).
+        # OPTIMIZED: Deep network with proper regularization
+        lstm_config = ENSEMBLE_CONFIG.get("base_learners", {}).get("lstm", {})
         self.lstm_params = lstm_params or {
-            "sequence_length": 16,
-            "hidden_size": 48,
-            "num_layers": 1,
+            "sequence_length": lstm_config.get("sequence_length", 16),
+            "hidden_size": lstm_config.get("hidden_size", 96),
+            "num_layers": lstm_config.get("num_layers", 3),
             "num_classes": 3,
-            "dropout": 0.4,
-            "learning_rate": 0.001,
-            "batch_size": 64,
-            "epochs": 30,
-            "early_stopping_patience": 7,
+            "dropout": lstm_config.get("dropout", 0.4),
+            "learning_rate": lstm_config.get("learning_rate", 5e-4),
+            "batch_size": lstm_config.get("batch_size", 64),
+            "epochs": lstm_config.get("epochs", 80),
+            "early_stopping_patience": lstm_config.get("early_stopping_patience", 15),
+            "l1_lambda": lstm_config.get("l1_lambda", 0.0),
+            "l2_lambda": lstm_config.get("l2_lambda", 1e-4),
+            "label_smoothing": lstm_config.get("label_smoothing", 0.1),
+            "lr_warmup_epochs": lstm_config.get("lr_warmup_epochs", 3),
+            "lr_min_factor": lstm_config.get("lr_min_factor", 0.01),
+            "max_grad_norm": lstm_config.get("max_grad_norm", 0.5),
+            "gradient_accumulation_steps": lstm_config.get("gradient_accumulation_steps", 4),
+            "bidirectional": lstm_config.get("bidirectional", False),
         }
 
         self.lstm_base = None  # Initialized during fit
 
         # Meta-Classifier: XGBoost
+        meta_config = ENSEMBLE_CONFIG.get("meta_learner", {})
         self.meta_xgb_params = meta_xgb_params or {
             "objective": "multi:softprob",
             "num_class": 3,
-            "max_depth": 3,  # Shallower than base
-            "learning_rate": 0.05,
+            "max_depth": meta_config.get("max_depth", 3),
+            "learning_rate": meta_config.get("learning_rate", 0.03),
             "n_estimators": 100,
             "subsample": 0.8,
             "colsample_bytree": 0.8,
@@ -163,21 +186,25 @@ class HybridEnsemble:
         from sklearn.model_selection import TimeSeriesSplit
         tscv = TimeSeriesSplit(n_splits=self.n_folds)
 
+        # Get memory limits from config
+        max_train_samples = self.memory_config.get("max_train_samples", 40000)
+        max_val_samples = self.memory_config.get("max_val_samples", 10000)
+        aggressive_gc = self.memory_config.get("aggressive_gc", True)
+
         for fold_idx, (train_idx, val_idx) in enumerate(tscv.split(X)):
             logger.info(
                 f"OOF fold {fold_idx + 1}/{self.n_folds} - Train: {len(train_idx):,} samples, Val: {len(val_idx):,} samples")
 
             # Subsample for memory efficiency on large datasets
-            max_samples = 25000  # Limit both train and val to prevent OOM
-            if len(train_idx) > max_samples:
+            if len(train_idx) > max_train_samples:
                 # Take last N samples (most recent data for time series)
-                train_idx = train_idx[-max_samples:]
+                train_idx = train_idx[-max_train_samples:]
                 logger.info(
                     f"    Subsampled train to {len(train_idx):,} samples")
 
-            if len(val_idx) > max_samples:
+            if len(val_idx) > max_val_samples:
                 # Take last N samples for validation too
-                val_idx = val_idx[-max_samples:]
+                val_idx = val_idx[-max_val_samples:]
                 logger.info(f"    Subsampled val to {len(val_idx):,} samples")
 
             # Use float32 to reduce memory

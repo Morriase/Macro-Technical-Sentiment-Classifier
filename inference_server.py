@@ -192,13 +192,13 @@ def engineer_features_from_ohlcv(df_m5: pd.DataFrame, df_h1: pd.DataFrame, df_h4
     logger.info(
         f"Engineering features for {pair} from M5={len(df_m5)}, H1={len(df_h1)}, H4={len(df_h4)} candles")
 
-    # Step 1: Base technical features on M5 (67 features)
+    # Step 1: Base technical features on M5 (~18 features - OPTIMIZED)
+    # Removed redundant indicators: Stochastic, BB, CCI, ATR per author's correlation analysis
     df_features = TECH_ENGINEER.calculate_all_features(df_m5.copy())
-    df_features = TECH_ENGINEER.calculate_feature_crosses(df_features)
     logger.info(
         f"✓ Calculated {len(df_features.columns)} base technical features")
 
-    # Step 2: Multi-timeframe features (14 features) using REAL H1/H4 data
+    # Step 2: Multi-timeframe features (8 features - OPTIMIZED: only RSI, ADX, regime)
     try:
         higher_timeframes = {
             'H1': df_h1,
@@ -214,7 +214,9 @@ def engineer_features_from_ohlcv(df_m5: pd.DataFrame, df_h1: pd.DataFrame, df_h4
         logger.error(f"Failed to add MTF features: {e}")
         raise ValueError(f"MTF feature engineering failed: {e}")
 
-    # Step 3: Macro features (3 features) - will be populated by engineer_macro_features()
+    # Step 3: Macro features (fallback if FRED not available)
+    # FRED provides: rate_differential, vix, yield_curve, gdp_growth_diff, etc.
+    # Fallback uses: tau_pre, tau_post, weighted_surprise from calendar events
     df_features["tau_pre"] = 0.0
     df_features["tau_post"] = 0.0
     df_features["weighted_surprise"] = 0.0
