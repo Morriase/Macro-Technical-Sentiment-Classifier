@@ -5,7 +5,7 @@ Architecture from required.txt:
 - Level-1: XGBoost Meta-Classifier (combines base learner outputs)
 """
 from src.models.lstm_model import LSTMSequenceModel
-from src.config import ENSEMBLE_CONFIG, USE_LSTM, IS_KAGGLE
+from src.config import ENSEMBLE_CONFIG, USE_LSTM, IS_KAGGLE, BASELINE_MODE
 from loguru import logger
 from typing import Dict, List, Tuple, Optional
 import joblib
@@ -326,10 +326,13 @@ class HybridEnsemble:
                 f"Dataset too large ({len(X):,} samples) for OOF - using simple split")
 
             # CRITICAL: Add gap between train/val to prevent LSTM sequence leakage
-            # LSTM uses sequence_length lookback, so we need a gap to prevent
-            # validation sequences from overlapping with training data
-            seq_length = self.lstm_params.get('sequence_length', 22)
-            gap = seq_length * 2  # Double the sequence length for safety
+            # Gap must be >= sequence_length + forward_window to prevent ANY overlap
+            # sequence_length = lookback window, forward_window = prediction horizon
+            seq_length = self.lstm_params.get('sequence_length', 40)
+            # forward_window_hours=8 / 4h_bars = 2 bars, but we use M5 so: 8*12=96 M5 bars
+            # 8 hours of M5 data (expert recommendation: test shorter horizon)
+            forward_bars = 96
+            gap = seq_length + forward_bars  # 40 + 96 = 136 samples minimum
 
             # Use last 20% as holdout for meta-learner training
             split_idx = int(len(X_scaled) * 0.8)
@@ -390,8 +393,9 @@ class HybridEnsemble:
                 verbose=50,
             )
 
-            # LSTM training (skip on Kaggle to save RAM)
-            if USE_LSTM:
+            # LSTM training (skip if BASELINE_MODE or USE_LSTM=False)
+            # Expert: compare XGBoost-only vs hybrid to see if LSTM adds value
+            if USE_LSTM and not BASELINE_MODE:
                 logger.info("Training LSTM base learner...")
                 self.lstm_base = LSTMSequenceModel(
                     input_size=X_scaled.shape[1], **self.lstm_params
@@ -404,7 +408,11 @@ class HybridEnsemble:
                     save_plots_path=save_plots_path,
                 )
             else:
-                logger.info("Skipping LSTM (USE_LSTM=False for Kaggle RAM)")
+                if BASELINE_MODE:
+                    logger.info(
+                        "Skipping LSTM (BASELINE_MODE=True - XGBoost-only experiment)")
+                else:
+                    logger.info("Skipping LSTM (USE_LSTM=False)")
                 self.lstm_base = None
 
             # Generate meta-features from holdout predictions
@@ -412,7 +420,7 @@ class HybridEnsemble:
             xgb_holdout_proba = self._xgb_predict_proba(
                 self.xgb_base, X_holdout)
 
-            if USE_LSTM and self.lstm_base is not None:
+            if USE_LSTM and not BASELINE_MODE and self.lstm_base is not None:
                 lstm_holdout_proba = self.lstm_base.predict_proba(X_holdout)
                 # Handle LSTM sequence offset
                 if len(lstm_holdout_proba) < len(xgb_holdout_proba):

@@ -19,6 +19,10 @@ IS_KAGGLE = os.path.exists('/kaggle/input')
 # T4 GPU on Kaggle has enough VRAM (16GB) for LSTM training
 USE_LSTM = True
 
+# BASELINE_MODE: Set True to run XGBoost-only baseline for comparison
+# Expert recommendation: compare LSTM+XGB vs XGB-only to see if LSTM adds value
+BASELINE_MODE = False  # Set True to skip LSTM entirely
+
 if IS_KAGGLE:
     # Kaggle paths - updated dataset location
     DATA_DIR = Path("/kaggle/input/macros-and-ohlc")
@@ -139,11 +143,13 @@ ENSEMBLE_CONFIG = {
             "tree_method": "hist",      # Histogram-based for memory efficiency
         },
         "lstm": {
-            # Architecture - based on senior ML engineer's parameters
-            "sequence_length": 40,      # Author's optimal historical depth via correlation
-            # Author's exact value (tested 20, 40, 60, 80)
-            "hidden_size": 40,
-            "num_layers": 3,            # Deep network for complex patterns
+            # Architecture - SIMPLIFIED per expert recommendation
+            # With weak signal, simpler models reduce overfitting
+            "sequence_length": 40,      # Keep 40 for adequate lookback
+            # REDUCED from 40 (expert: smaller capacity)
+            "hidden_size": 32,
+            # REDUCED from 3 (expert: 1 layer baseline)
+            "num_layers": 1,
             "bidirectional": False,     # Unidirectional saves 50% LSTM memory
             # Activation - author found Swish accelerates training
             "hidden_activation": "swish",  # Swish > ReLU for hidden layers
@@ -303,7 +309,8 @@ IMBALANCE_CONFIG = {
 TARGET_CONFIG = {
     # "ternary" (Buy/Sell/Hold) or "binary" (Up/Down)
     "classification_type": "ternary",
-    "forward_window_hours": 24,
+    # REDUCED from 24h to 8h per expert: shorter horizons more predictable from M5 data
+    "forward_window_hours": 8,
     # Fixed 4 pips (was None=ATR-based, caused 68% signals)
     "min_move_threshold_pips": 4.0,
     "atr_multiplier": 0.6,  # Only used if min_move_threshold_pips is None

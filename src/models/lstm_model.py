@@ -413,9 +413,17 @@ class LSTMSequenceModel:
         self.train_accs = []
         self.val_accs = []
 
-        # Loss function with configurable label smoothing
-        # Label smoothing prevents overconfident predictions
-        criterion = nn.CrossEntropyLoss(label_smoothing=self.label_smoothing)
+        # CLASS WEIGHTS: Address imbalance (Buy 24%, Sell 23%, Hold 53%)
+        # Expert recommendation: inverse-frequency weights to prevent Hold domination
+        # Class mapping: Buy=0, Sell=1, Hold=2
+        # Upweight minority classes
+        class_weights = torch.tensor([2.0, 2.0, 1.0], device=self.device)
+
+        # Loss function with class weights and label smoothing
+        criterion = nn.CrossEntropyLoss(
+            weight=class_weights,
+            label_smoothing=self.label_smoothing
+        )
 
         # Use AdamW optimizer - better weight decay implementation
         # AdamW decouples weight decay from gradient update (fixes rising loss)
