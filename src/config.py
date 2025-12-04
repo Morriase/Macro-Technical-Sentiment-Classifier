@@ -15,9 +15,9 @@ load_dotenv(PROJECT_ROOT / ".env")
 # Detect if running on Kaggle
 IS_KAGGLE = os.path.exists('/kaggle/input')
 
-# LSTM toggle: disable on Kaggle to save RAM and avoid bad val metrics
-# Set to True locally for full hybrid ensemble
-USE_LSTM = not IS_KAGGLE
+# LSTM toggle: Enable for full hybrid ensemble
+# T4 GPU on Kaggle has enough VRAM (16GB) for LSTM training
+USE_LSTM = True
 
 if IS_KAGGLE:
     # Kaggle paths - updated dataset location

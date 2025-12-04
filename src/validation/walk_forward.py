@@ -297,7 +297,11 @@ class WalkForwardOptimizer:
         logger.info(f"Best value: {study.best_value:.4f}")
         logger.info(f"Best params: {study.best_params}")
 
-        return study.best_params
+        # Add fixed parameters that weren't optimized
+        best_params = study.best_params.copy()
+        best_params["n_estimators"] = 500  # Fixed value used in trials
+
+        return best_params
 
     def run_walk_forward_optimization(
         self,
