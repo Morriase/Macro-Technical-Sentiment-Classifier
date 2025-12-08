@@ -52,3 +52,17 @@ Specific configuration choices are necessary for sequence models like LSTM to en
 | **Sequence Output Control** | The `return_sequences` parameter determines the output shape, affecting subsequent layers. Testing involved setting this parameter to **`False`** (returning only the final result for the sequence) and **`True`** (returning results for each time step). |
 
 This comprehensive approach combines robust layer configuration (normalization, dropout) with algorithmic parameter choices (Adam optimization, low learning rates) and data integrity control (disabling shuffle) to enhance the model's ability to converge stably and effectively learn patterns in sequential data.
+
+****Can Batch normalization work with other regularization methods (apart from dropout)? 
+    -> Yes, Batch Normalization (BN) can work with other regularization methods, though it acts as a form of regularization itself and its combination with certain techniques requires careful consideration.
+
+The sources specifically detail the interaction between Batch Normalization and Dropout:
+
+*   **Dropout:** The combined use of **Dropout and Batch Normalization is generally not recommended** because it may have a **negative effect on the training results of a neural network**. Batch Normalization stabilizes training, and when combined with the noise introduced by Dropout's random masking, it disrupts the necessary statistical calculations (mean and variance), interfering with the BN process.
+
+Regarding other regularization techniques, the framework discussed supports their use in models that might also employ Batch Normalization, suggesting they are implemented independently or in conjunction:
+
+*   **Elastic Net (L1 and L2 Regularization):** The architectural setup of the complex Python models includes **Elastic Net regularization** (`kernel_regularizer=keras.regularizers.l1_l2`). These models were often tested using low coefficients for L1 ($\mathbf{10^{-7}}$) and L2 ($\mathbf{10^{-5}}$).
+*   The same models can incorporate Batch Normalization layers. Batch Normalization layers were tested **before hidden layers to stabilize training**.
+
+The sources emphasize that the use of Batch Normalization itself **serves as a form of regularization** and stabilizes the process, which allows for the **elimination of other regularization methods**, including Dropout. However, the use of BN does not preclude the architectural implementation of L1 and L2 regularization (Elastic Net) within the tested layer structures.
