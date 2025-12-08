@@ -100,9 +100,9 @@ class HybridEnsemble:
             "hidden_size": lstm_config.get("hidden_size", 64),
             "num_layers": lstm_config.get("num_layers", 1),
             "num_classes": 2,
-            # Regularization - Moderate dropout
-            "dropout": lstm_config.get("dropout", 0.3),
-            "use_batch_norm": lstm_config.get("use_batch_norm", False),
+            # Regularization - BatchNorm only
+            "dropout": lstm_config.get("dropout", 0.0),
+            "use_batch_norm": lstm_config.get("use_batch_norm", True),
             # Learning rate
             "learning_rate": lstm_config.get("learning_rate", 1e-4),
             "batch_size": lstm_config.get("batch_size", 4096),
