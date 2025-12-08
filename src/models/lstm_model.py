@@ -36,7 +36,7 @@ class LSTMSequenceClassifier(nn.Module):
         input_size: int,
         hidden_size: int = 40,
         num_layers: int = 1,
-        num_classes: int = 3,
+        num_classes: int = 2,  # BINARY: Buy/Sell
         dropout: float = 0.0,
         bidirectional: bool = False,
         use_batch_norm: bool = True,
@@ -49,7 +49,7 @@ class LSTMSequenceClassifier(nn.Module):
             input_size: Number of input features per timestep
             hidden_size: Number of hidden units in LSTM (default 40 per MQL5)
             num_layers: Number of LSTM layers (default 1 per MQL5)
-            num_classes: Number of output classes (Buy/Sell/Hold)
+            num_classes: Number of output classes (Buy/Sell)
             dropout: Dropout rate for regularization
             bidirectional: Whether to use bidirectional LSTM
             use_batch_norm: Whether to use BatchNormalization (stabilizes training)

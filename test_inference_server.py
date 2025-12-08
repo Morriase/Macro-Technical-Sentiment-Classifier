@@ -143,13 +143,17 @@ def test_single_prediction(pair="EUR_USD"):
     logger.info("=" * 60)
 
     try:
-        # Generate test data
-        ohlcv = generate_test_ohlcv(n_candles=500, pair=pair)
+        # Generate test data for all timeframes
+        ohlcv_m5 = generate_test_ohlcv(n_candles=500, pair=pair)
+        ohlcv_h1 = generate_test_ohlcv(n_candles=500, pair=pair)
+        ohlcv_h4 = generate_test_ohlcv(n_candles=500, pair=pair)
         events = generate_test_events(pair=pair, n_events=5)
 
         payload = {
             'pair': pair,
-            'ohlcv': ohlcv,
+            'ohlcv_m5': ohlcv_m5,
+            'ohlcv_h1': ohlcv_h1,
+            'ohlcv_h4': ohlcv_h4,
             'events': events  # Include calendar events for macro features
         }
 
@@ -171,8 +175,8 @@ def test_single_prediction(pair="EUR_USD"):
             for signal, prob in data['probabilities'].items():
                 logger.info(f"    {signal}: {prob:.2%}")
             logger.info(f"  Features used: {data['feature_count']}")
-            logger.info(f"  Candles processed: {data['candles_processed']}")
-            logger.info(f"  Candles used: {data['candles_used']}")
+            logger.info(f"  Candles M5: {data.get('candles_m5', 'N/A')}")
+            logger.info(f"  Candles used: {data.get('candles_used', 'N/A')}")
 
             # Validate response structure
             required_fields = ['pair', 'prediction',
@@ -207,11 +211,14 @@ def test_insufficient_data():
 
     try:
         # Only 50 candles (should fail - need 250+)
-        ohlcv = generate_test_ohlcv(n_candles=50)
+        ohlcv_short = generate_test_ohlcv(n_candles=50)
+        ohlcv_ok = generate_test_ohlcv(n_candles=500)
 
         payload = {
             'pair': 'EUR_USD',
-            'ohlcv': ohlcv
+            'ohlcv_m5': ohlcv_short,  # This one is too short
+            'ohlcv_h1': ohlcv_ok,
+            'ohlcv_h4': ohlcv_ok
         }
 
         response = requests.post(
@@ -244,7 +251,9 @@ def test_invalid_pair():
 
         payload = {
             'pair': 'XYZ_ABC',  # Invalid pair
-            'ohlcv': ohlcv
+            'ohlcv_m5': ohlcv,
+            'ohlcv_h1': ohlcv,
+            'ohlcv_h4': ohlcv
         }
 
         response = requests.post(

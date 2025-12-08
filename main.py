@@ -35,12 +35,19 @@ warnings.filterwarnings('ignore', category=RuntimeWarning)
 # Optional imports for local environment (not needed on Kaggle)
 try:
     from src.data_acquisition.macro_data import MacroDataAcquisition
-    from src.data_acquisition.fx_data import FXDataAcquisition
-    HAS_API_SOURCES = True
+    HAS_MACRO_DATA = True
 except ImportError:
-    HAS_API_SOURCES = False
+    HAS_MACRO_DATA = False
     MacroDataAcquisition = None
+
+try:
+    from src.data_acquisition.fx_data import FXDataAcquisition
+    HAS_FX_DATA = True
+except ImportError:
+    HAS_FX_DATA = False
     FXDataAcquisition = None
+
+HAS_API_SOURCES = HAS_MACRO_DATA and HAS_FX_DATA
 
 # FRED Macro Loader (real historical macro data)
 try:
@@ -101,10 +108,10 @@ class ForexClassifierPipeline:
             self.fx_data = None
             # Create MacroDataAcquisition for feature calculations (doesn't need API)
             self.macro_data = MacroDataAcquisition() if (
-                HAS_API_SOURCES and MacroDataAcquisition) else None
+                HAS_MACRO_DATA and MacroDataAcquisition) else None
             logger.info("Using Kaggle dataset")
         else:
-            if not HAS_API_SOURCES:
+            if not HAS_FX_DATA:
                 raise ImportError(
                     "API data sources (OANDA, Finnhub) not available. "
                     "Install required packages or use Kaggle dataset."
@@ -112,7 +119,8 @@ class ForexClassifierPipeline:
             self.kaggle_loader = None
             self.kaggle_news_loader = None
             self.fx_data = FXDataAcquisition()
-            self.macro_data = MacroDataAcquisition()
+            self.macro_data = MacroDataAcquisition() if (
+                HAS_MACRO_DATA and MacroDataAcquisition) else None
             logger.info("Using OANDA/API data sources")
 
         # Initialize feature engineers (common to both modes)
@@ -430,6 +438,75 @@ class ForexClassifierPipeline:
         )
 
         # Determine threshold: fixed pips or ATR-based
+        # REDESIGN: Binary Classification (Buy/Sell only)
+        # User requirement: "redesign to only predict buy or sell"
+        # We split simply at 0: > 0 is Buy (1), <= 0 is Sell (0)
+
+        logger.info("Creating BINARY target (Buy/Sell) - removing Hold class")
+
+        # Binary target: 1 (Buy) if return > 0, else 0 (Sell)
+        self.df_features["target"] = np.where(
+            self.df_features["forward_return"] > 0, 1, 0
+        )
+
+        # Target class is same as target (0 or 1)
+        self.df_features["target_class"] = self.df_features["target"].astype(
+            int)
+
+        # FILTERING: Remove "Hold" signals (small moves) from training data
+        # User feedback: "feature engineering will still make hold signals in the training data"
+        # We must filter out the noise (small moves) so the model trains on CLEAR signals.
+
+        if min_move_pips is not None:
+            threshold = min_move_pips
+            logger.info(
+                f"Filtering training data: Removing moves < {threshold} pips")
+
+            # Calculate absolute return in pips
+            abs_return_pips = self.df_features["forward_return_pips"].abs()
+
+            # Keep only significant moves
+            initial_len = len(self.df_features)
+            self.df_features = self.df_features[abs_return_pips >= threshold].copy(
+            )
+            filtered_len = len(self.df_features)
+
+            logger.info(
+                f"Filtered out {initial_len - filtered_len} small-move samples ({((initial_len - filtered_len)/initial_len)*100:.1f}%)")
+        else:
+            # ATR-based filtering
+            atr_col = "atr_14"
+            if atr_col in self.df_features.columns:
+                threshold_series = (
+                    self.df_features[atr_col] * pip_multiplier * atr_multiplier)
+                logger.info(
+                    f"Filtering training data: Removing moves < {atr_multiplier}x ATR")
+
+                abs_return_pips = self.df_features["forward_return_pips"].abs()
+
+                initial_len = len(self.df_features)
+                self.df_features = self.df_features[abs_return_pips >= threshold_series].copy(
+                )
+                filtered_len = len(self.df_features)
+
+                logger.info(
+                    f"Filtered out {initial_len - filtered_len} small-move samples ({((initial_len - filtered_len)/initial_len)*100:.1f}%)")
+
+        # Drop future data
+        self.df_features.dropna(subset=["forward_close"], inplace=True)
+
+        # Class distribution
+        class_counts = self.df_features["target_class"].value_counts(
+        ).sort_index()
+        logger.info("Target class distribution (Binary - Filtered):")
+        for cls, count in class_counts.items():
+            class_name = ["Sell", "Buy"][cls]
+            pct = count / len(self.df_features) * 100
+            logger.info(f"  {class_name} ({cls}): {count} ({pct:.1f}%)")
+        return
+
+        # --- LEGACY 3-CLASS LOGIC (DISABLED) ---
+        """
         if min_move_pips is not None:
             # Fixed threshold
             threshold = min_move_pips
@@ -478,19 +555,7 @@ class ForexClassifierPipeline:
                 pct = count / len(self.df_features) * 100
                 logger.info(f"  {class_name}: {count} ({pct:.1f}%)")
             return
-
-        # Fixed threshold logic (original)
-        conditions = [
-            self.df_features["forward_return_pips"] > threshold,   # Buy
-            self.df_features["forward_return_pips"] < -threshold,  # Sell
-        ]
-        choices = [1, -1]
-        self.df_features["target"] = np.select(conditions, choices, default=0)
-
-        # Map to 0, 1, 2 for sklearn
-        target_map = {-1: 1, 0: 2, 1: 0}  # Sell=1, Hold=2, Buy=0
-        self.df_features["target_class"] = self.df_features["target"].map(
-            target_map)
+        """
 
         # Drop future data
         self.df_features.dropna(subset=["forward_close"], inplace=True)

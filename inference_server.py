@@ -619,7 +619,8 @@ def predict():
         prediction_proba = prediction_proba[-1]
 
         # Map class to signal
-        class_map = {0: "SELL", 1: "HOLD", 2: "BUY"}
+        # BINARY CLASSIFICATION: 0=SELL, 1=BUY
+        class_map = {0: "SELL", 1: "BUY"}
         raw_signal = class_map[prediction_class]
         confidence = float(prediction_proba[prediction_class])
 
@@ -660,9 +661,9 @@ def predict():
             'raw_prediction': raw_signal,  # Original model prediction before quality filter
             'confidence': round(confidence, 4),
             'probabilities': {
-                'BUY': round(float(prediction_proba[2]), 4),
+                'BUY': round(float(prediction_proba[1]), 4),
                 'SELL': round(float(prediction_proba[0]), 4),
-                'HOLD': round(float(prediction_proba[1]), 4)
+                'HOLD': 0.0  # No Hold class in binary model
             },
             # Fuzzy quality metrics
             'quality_score': round(quality_score, 2),

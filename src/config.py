@@ -141,6 +141,8 @@ ENSEMBLE_CONFIG = {
             # Memory optimization
             "max_bin": 128,             # Reduce histogram bins (default 256)
             "tree_method": "hist",      # Histogram-based for memory efficiency
+            # BINARY CLASSIFICATION UPDATE
+            "num_class": 2,             # Changed from 3 to 2 (Buy/Sell)
         },
         "lstm": {
             # Architecture - matches MQL5_LSTM.mq5 exactly (adapted for 3-class)
@@ -178,6 +180,8 @@ ENSEMBLE_CONFIG = {
             "beta2": 0.999,             # Author's value
             # Gradient clipping - prevents exploding gradients
             "max_grad_norm": 1.0,
+            # BINARY CLASSIFICATION UPDATE
+            "num_classes": 2,           # Changed from 3 to 2 (Buy/Sell)
             # Memory optimization - gradient accumulation for large effective batch
             "gradient_accumulation_steps": 1,
         },

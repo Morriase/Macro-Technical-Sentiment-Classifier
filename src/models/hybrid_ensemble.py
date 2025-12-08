@@ -66,7 +66,7 @@ class HybridEnsemble:
             "base_learners", {}).get("xgboost", {})
         self.xgb_params = xgb_params or {
             "objective": "multi:softprob",
-            "num_class": 3,
+            "num_class": 2,  # BINARY: Buy/Sell
             "max_depth": xgb_config.get("max_depth", 4),
             "learning_rate": xgb_config.get("learning_rate", 0.02),
             "n_estimators": xgb_config.get("n_estimators", 500),
@@ -101,7 +101,7 @@ class HybridEnsemble:
             "hidden_size": lstm_config.get("hidden_size", 40),
             # 1 LSTM layer
             "num_layers": lstm_config.get("num_layers", 1),
-            "num_classes": 3,
+            "num_classes": 2,  # BINARY: Buy/Sell
             # No dropout (BatchNorm replaces)
             "dropout": lstm_config.get("dropout", 0.0),
             # MQL5: 3e-5
@@ -132,7 +132,7 @@ class HybridEnsemble:
         meta_config = ENSEMBLE_CONFIG.get("meta_learner", {})
         self.meta_xgb_params = meta_xgb_params or {
             "objective": "multi:softprob",
-            "num_class": 3,
+            "num_class": 2,  # BINARY: Buy/Sell
             "max_depth": meta_config.get("max_depth", 3),
             "learning_rate": meta_config.get("learning_rate", 0.03),
             "n_estimators": 100,
@@ -191,7 +191,7 @@ class HybridEnsemble:
         import torch
 
         n_samples, n_features = X.shape
-        n_classes = 3
+        n_classes = 2  # BINARY: Buy/Sell
 
         # Initialize OOF prediction arrays
         xgb_oof_proba = np.zeros((n_samples, n_classes), dtype=np.float32)
@@ -231,7 +231,7 @@ class HybridEnsemble:
             logger.info(f"  → Training XGBoost (fold {fold_idx + 1})...")
             from sklearn.utils.class_weight import compute_sample_weight
             fold_sample_weights = compute_sample_weight(
-                class_weight={0: 3.0, 1: 3.0, 2: 1.0},
+                class_weight='balanced',
                 y=y_train_fold
             )
 
@@ -362,6 +362,7 @@ class HybridEnsemble:
             max_train = 50_000  # Reduced for Kaggle RAM
             max_holdout = 10_000
 
+            # Prepare XGBoost training data (Stratified Sampling OK)
             if len(X_train_full) > max_train:
                 # Use stratified sampling to maintain class balance
                 from sklearn.model_selection import train_test_split
@@ -372,10 +373,21 @@ class HybridEnsemble:
                     random_state=self.random_state
                 )
                 logger.info(
-                    f"  Stratified sample: {max_train:,} training samples")
+                    f"  Stratified sample (XGB): {max_train:,} training samples")
             else:
                 X_train_base = X_train_full
                 y_train_base = y_train_full
+
+            # Prepare LSTM training data (MUST BE CONTINUOUS - NO SHUFFLING)
+            # Use the most recent data (tail of training set)
+            if len(X_train_full) > max_train:
+                X_train_lstm = X_train_full[-max_train:]
+                y_train_lstm = y_train_full[-max_train:]
+                logger.info(
+                    f"  Continuous sample (LSTM): last {max_train:,} training samples")
+            else:
+                X_train_lstm = X_train_full
+                y_train_lstm = y_train_full
 
             if len(X_holdout_full) > max_holdout:
                 # Take from END of holdout (most recent data for validation)
@@ -395,15 +407,10 @@ class HybridEnsemble:
             logger.info("Training XGBoost base learner...")
             from sklearn.utils.class_weight import compute_sample_weight
 
-            # CRITICAL FIX: Correct class weight calculation
-            # Data distribution: Buy 13.3% (10602), Sell 13.1% (10470), Hold 73.6% (58727)
-            # Weight = 1 / (fraction of that class) × (num_classes / total_samples)
-            # Or simpler: weight = count_of_largest_class / count_of_that_class
-            # Hold weight: 58727 / 58727 = 1.0
-            # Buy weight:  58727 / 10602 ≈ 5.54
-            # Sell weight: 58727 / 10470 ≈ 5.61
+            # CRITICAL FIX: Dynamic class weights for Binary Classification
+            # We use 'balanced' to automatically handle any imbalance between Buy/Sell
             sample_weights = compute_sample_weight(
-                class_weight={0: 5.54, 1: 5.61, 2: 1.0},
+                class_weight='balanced',
                 y=y_train_base
             )
             self.xgb_base.fit(
@@ -421,9 +428,10 @@ class HybridEnsemble:
                 self.lstm_base = LSTMSequenceModel(
                     input_size=X_scaled.shape[1], **self.lstm_params
                 )
+                # CRITICAL: Use X_train_lstm (continuous) not X_train_base (shuffled)
                 self.lstm_base.fit(
-                    X_train_base,
-                    y_train_base,
+                    X_train_lstm,
+                    y_train_lstm,
                     X_holdout[:5000],
                     y_holdout[:5000],
                     save_plots_path=save_plots_path,
