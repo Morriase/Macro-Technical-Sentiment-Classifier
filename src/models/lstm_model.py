@@ -1,60 +1,77 @@
 """
 LSTM Sequence Model for Temporal Pattern Recognition
+MEMORY OPTIMIZED: True Lazy Loading (No 3D Array Creation)
 Designed for financial time series with strong temporal dependencies
-Optimized for GPU/CUDA training on Kaggle
 """
 from torch.amp import autocast, GradScaler
 from src.config import ENSEMBLE_CONFIG, GPU_CONFIG, DEVICE, USE_CUDA
 from sklearn.preprocessing import MinMaxScaler
+from sklearn.utils.class_weight import compute_class_weight
 from loguru import logger
 from typing import Tuple, Optional, List
 import torch.optim as optim
 import torch.nn as nn
 import torch
-import pandas as pd
 import numpy as np
 import sys
+import gc
 from pathlib import Path
+from torch.utils.data import Dataset, DataLoader
 
-# Add project root to path FIRST (before src imports)
+# Add project root to path FIRST
 project_root = Path(__file__).parent.parent.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-# Enable Automatic Mixed Precision (AMP) for faster GPU training
+
+class LazySequenceDataset(Dataset):
+    """
+    Zero-copy dataset that slices sequences on-the-fly.
+    Keeps data in 2D to save 40x RAM.
+
+    RAM Math:
+    - 2D Array: 2M rows × 33 features × 4 bytes = 0.26 GB
+    - 3D Array: 2M rows × 40 seq × 33 features × 4 bytes = 10.5 GB
+    - This class keeps data 2D and only creates 3D windows per batch
+    """
+
+    def __init__(self, X: np.ndarray, y: np.ndarray, sequence_length: int):
+        # Store as float32 to save 50% RAM compared to float64
+        self.X = torch.tensor(X.astype(np.float32), dtype=torch.float32)
+        self.y = torch.tensor(y, dtype=torch.long) if y is not None else None
+        self.seq_len = sequence_length
+
+    def __len__(self):
+        return len(self.X) - self.seq_len
+
+    def __getitem__(self, idx):
+        # Create 3D view only for this specific item
+        # idx -> [idx, idx+seq_len]
+        x_window = self.X[idx: idx + self.seq_len]
+        if self.y is not None:
+            # Target is the label at the END of the sequence
+            y_label = self.y[idx + self.seq_len - 1]
+            return x_window, y_label
+        return x_window
 
 
 class LSTMSequenceClassifier(nn.Module):
     """
     Deep LSTM network for sequence classification
     Captures temporal dependencies in financial time series
-    OPTIMIZED: Swish activation + BatchNorm per senior ML engineer's findings
     """
 
     def __init__(
         self,
         input_size: int,
-        hidden_size: int = 40,
+        hidden_size: int = 64,
         num_layers: int = 1,
-        num_classes: int = 2,  # BINARY: Buy/Sell
-        dropout: float = 0.0,
+        num_classes: int = 2,
+        dropout: float = 0.3,
         bidirectional: bool = False,
         use_batch_norm: bool = True,
-        hidden_activation: str = "swish",
+        hidden_activation: str = None,
     ):
-        """
-        Initialize LSTM classifier
-
-        Args:
-            input_size: Number of input features per timestep
-            hidden_size: Number of hidden units in LSTM (default 40 per MQL5)
-            num_layers: Number of LSTM layers (default 1 per MQL5)
-            num_classes: Number of output classes (Buy/Sell)
-            dropout: Dropout rate for regularization
-            bidirectional: Whether to use bidirectional LSTM
-            use_batch_norm: Whether to use BatchNormalization (stabilizes training)
-            hidden_activation: Unused (LSTM has internal non-linearity via gates)
-        """
         super(LSTMSequenceClassifier, self).__init__()
 
         self.input_size = input_size
@@ -62,21 +79,13 @@ class LSTMSequenceClassifier(nn.Module):
         self.num_layers = num_layers
         self.num_classes = num_classes
         self.bidirectional = bidirectional
-
-        # CRITICAL FIX: In financial time series, we NEED both BatchNorm AND Dropout
-        # BatchNorm: Stabilizes gradients and internal covariate shift
-        # Dropout: Prevents memorization of noisy candle patterns
-        # This differs from computer vision where BN replaces Dropout
-        # For stochastic financial data, both are essential for generalization
-
         self.use_batch_norm = use_batch_norm
-        self.hidden_activation = hidden_activation
 
-        # Input BatchNorm - stabilizes training (author's recommendation)
+        # 1. Input BatchNorm - stabilizes training
         if use_batch_norm:
             self.input_bn = nn.BatchNorm1d(input_size)
 
-        # LSTM layers
+        # 2. LSTM layers
         self.lstm = nn.LSTM(
             input_size=input_size,
             hidden_size=hidden_size,
@@ -86,70 +95,51 @@ class LSTMSequenceClassifier(nn.Module):
             bidirectional=bidirectional,
         )
 
-        # Post-LSTM BatchNorm
+        # 3. Post-LSTM BatchNorm
         fc_input_size = hidden_size * 2 if bidirectional else hidden_size
         if use_batch_norm:
             self.lstm_bn = nn.BatchNorm1d(fc_input_size)
 
-        # Dropout for regularization
+        # 4. Dropout & Output Head
         self.dropout = nn.Dropout(dropout)
-
-        # Note: No activation after LSTM output
-        # LSTM gates provide internal non-linearity (sigmoid/tanh gates + cell state)
-        # Additional activation function would be redundant and harmful to learning
-
-        # Fully connected output layer
         self.fc = nn.Linear(fc_input_size, num_classes)
-
-        # Softmax for probabilities
         self.softmax = nn.Softmax(dim=1)
 
     def forward(self, x, return_hidden=False):
         """
-        Forward pass: Input → BatchNorm → LSTM → Dropout → FC → Logits
-        No activation after LSTM (LSTM has internal non-linearity via gates)
+        Forward pass: Input → BatchNorm → LSTM → BatchNorm → Dropout → FC → Logits
 
         Args:
             x: Input tensor of shape (batch_size, sequence_length, input_size)
             return_hidden: Whether to return final hidden state
-
-        Returns:
-            Logits or (logits, hidden_state) if return_hidden=True
         """
-        # Apply input BatchNorm (stabilizes training)
+        # Apply Input BatchNorm
         if self.use_batch_norm:
-            # BatchNorm1d expects (batch, features), so transpose
+            # BN expects (batch, features, seq_len)
             batch_size, seq_len, features = x.shape
-            x = x.transpose(1, 2)  # (batch, features, seq_len)
+            x = x.transpose(1, 2)
             x = self.input_bn(x)
-            x = x.transpose(1, 2)  # (batch, seq_len, features)
+            x = x.transpose(1, 2)
 
-        # LSTM forward pass
-        # lstm_out shape: (batch_size, seq_length, hidden_size * num_directions)
-        # h_n shape: (num_layers * num_directions, batch_size, hidden_size)
-        lstm_out, (h_n, c_n) = self.lstm(x)
+        # LSTM - we only need the final hidden state
+        # h_n shape: (num_layers * num_directions, batch, hidden_size)
+        _, (h_n, _) = self.lstm(x)
 
-        # Get the final hidden state from last layer
         if self.bidirectional:
-            # Concatenate forward and backward hidden states
             hidden = torch.cat((h_n[-2], h_n[-1]), dim=1)
         else:
             hidden = h_n[-1]
 
-        # Apply post-LSTM BatchNorm
+        # Apply Post-LSTM BatchNorm
         if self.use_batch_norm:
             hidden = self.lstm_bn(hidden)
 
-        # No activation after LSTM - LSTM gates already provide non-linearity
-        # Apply dropout
+        # Dropout & FC
         hidden = self.dropout(hidden)
-
-        # Fully connected layer
         logits = self.fc(hidden)
 
         if return_hidden:
             return logits, hidden
-
         return logits
 
     def predict_proba(self, x):
@@ -162,65 +152,41 @@ class LSTMSequenceClassifier(nn.Module):
 
 class LSTMSequenceModel:
     """
-    Wrapper for LSTM model with training and prediction utilities
-    OPTIMIZED: Swish activation, BatchNorm, author's parameters
+    Memory-Optimized LSTM Wrapper with True Lazy Loading
+
+    Key Optimization: Never creates 3D arrays in RAM.
+    Data stays 2D, sequences are sliced on-the-fly per batch.
     """
 
     def __init__(
         self,
         input_size: int,
         sequence_length: int = 40,
-        hidden_size: int = 40,
+        hidden_size: int = 64,
         num_layers: int = 1,
-        num_classes: int = 3,
-        dropout: float = 0.0,
-        learning_rate: float = 3e-5,
-        batch_size: int = 10000,
+        num_classes: int = 2,
+        dropout: float = 0.3,
+        learning_rate: float = 1e-4,
+        batch_size: int = 128,
         epochs: int = 500,
-        early_stopping_patience: int = 20,
+        early_stopping_patience: int = 25,
         device: Optional[str] = None,
         l1_lambda: float = 1e-7,
-        l2_lambda: float = 1e-5,
+        l2_lambda: float = 1e-3,
         beta1: float = 0.9,
         beta2: float = 0.999,
         label_smoothing: float = 0.1,
-        lr_warmup_epochs: int = 3,
+        lr_warmup_epochs: int = 5,
         lr_min_factor: float = 0.01,
         max_grad_norm: float = 1.0,
         gradient_accumulation_steps: int = 1,
         bidirectional: bool = False,
         use_batch_norm: bool = True,
-        hidden_activation: str = "swish",
-        **kwargs,  # Accept extra params gracefully
+        hidden_activation: str = None,
+        **kwargs,
     ):
         """
-        Initialize LSTM sequence model (MQL5_LSTM.mq5 exact parameters)
-
-        Architecture: Input(160) → BatchNorm → LSTM(40) → Output(2)
-        Matches MQL5 training: 1 LSTM layer, BatchNorm, no dropout, 3e-5 LR
-
-        Args:
-            input_size: Number of features per timestep
-            sequence_length: Look-back window (40 bars = BarsToLine in MQL5)
-            hidden_size: LSTM hidden units (40, matches HiddenLayer in MQL5)
-            num_layers: Number of LSTM layers (1 = MQL5 default, no hidden layers)
-            num_classes: Number of output classes (3 for Buy/Sell/Hold)
-            dropout: Dropout rate (0.0 - BatchNorm replaces dropout per MQL5)
-            learning_rate: Initial learning rate (3e-5 from MQL5, NOT 3e-4)
-            batch_size: Training batch size (10000 from MQL5)
-            epochs: Maximum training epochs (500 from MQL5)
-            early_stopping_patience: Patience for early stopping (20 from MQL5)
-            device: 'cuda', 'cpu', or None (auto-detect)
-            l1_lambda: L1 regularization (1e-7, author's value)
-            l2_lambda: L2 regularization (1e-5, author's value)
-            label_smoothing: Label smoothing factor (0.1)
-            lr_warmup_epochs: Epochs for learning rate warmup
-            lr_min_factor: Minimum LR as fraction of initial
-            max_grad_norm: Gradient clipping norm (1.0)
-            gradient_accumulation_steps: Steps to accumulate gradients
-            bidirectional: Use bidirectional LSTM
-            use_batch_norm: Use BatchNormalization (author's recommendation)
-            hidden_activation: Activation function ('swish' accelerates training)
+        Initialize LSTM sequence model with memory optimization.
         """
         self.input_size = input_size
         self.sequence_length = sequence_length
@@ -232,38 +198,22 @@ class LSTMSequenceModel:
         self.batch_size = batch_size
         self.epochs = epochs
         self.early_stopping_patience = early_stopping_patience
-        # Regularization parameters
         self.l1_lambda = l1_lambda
         self.l2_lambda = l2_lambda
-        # Optimizer momentum parameters
         self.beta1 = beta1
         self.beta2 = beta2
-        # Training parameters
         self.label_smoothing = label_smoothing
         self.lr_warmup_epochs = lr_warmup_epochs
         self.lr_min_factor = lr_min_factor
         self.max_grad_norm = max_grad_norm
         self.gradient_accumulation_steps = gradient_accumulation_steps
         self.bidirectional = bidirectional
-        # New: BatchNorm and Swish activation
         self.use_batch_norm = use_batch_norm
-        self.hidden_activation = hidden_activation
 
-        # CRITICAL FIX: In financial time series, we NEED both BatchNorm AND Dropout
-        # Senior MLOps Engineer: "In Finance, you need both: BatchNorm to stabilize the
-        # gradient, and Dropout to force the model to learn robust features rather than
-        # memorizing specific candle sequences."
-        # - BatchNorm: Stabilizes internal covariate shift, allows faster learning
-        # - Dropout: Randomly breaks connections to prevent overfitting on noise
-        # This differs from computer vision where BN can replace Dropout
+        # Device
+        self.device = torch.device(device if device else DEVICE)
 
-        # Device - use config or auto-detect
-        if device is None:
-            self.device = DEVICE
-        else:
-            self.device = torch.device(device)
-
-        # Initialize model with BatchNorm and Swish
+        # Initialize model
         self.model = LSTMSequenceClassifier(
             input_size=input_size,
             hidden_size=hidden_size,
@@ -271,79 +221,34 @@ class LSTMSequenceModel:
             num_classes=num_classes,
             dropout=dropout,
             bidirectional=bidirectional,
-            use_batch_norm=self.use_batch_norm,  # Use the potentially modified flag
-            hidden_activation=hidden_activation,
+            use_batch_norm=use_batch_norm,
         ).to(self.device)
 
-        # Multi-GPU Support (DataParallel) - only if multiple GPUs available
-        # NOTE: DataParallel only exposes forward(), not custom methods like predict_proba()
-        # The predict_proba() method handles this by checking isinstance(self.model, nn.DataParallel)
+        # Multi-GPU Support
         if torch.cuda.device_count() > 1:
             logger.info(f"Using {torch.cuda.device_count()} GPUs for training")
             self.model = nn.DataParallel(self.model)
 
-        # Mixed precision training (for faster GPU training)
-        self.use_amp = GPU_CONFIG['mixed_precision']
-        self.scaler_amp = GradScaler('cuda') if self.use_amp else None
+        # Mixed precision training
+        self.use_amp = GPU_CONFIG.get('mixed_precision', False)
+        self.scaler_amp = GradScaler(
+            'cuda') if self.use_amp and torch.cuda.is_available() else None
 
-        # Scaler for feature normalization
-        # CRITICAL: Use (-1, 1) range for Tanh/Swish activations
-        # Zero-centered data converges faster than (0, 1) range
+        # Scaler for feature normalization (-1, 1) for Tanh/Swish
         self.scaler = MinMaxScaler(feature_range=(-1, 1))
         self.is_fitted = False
+
+        # Training history
+        self.train_losses = []
+        self.val_losses = []
+        self.train_accs = []
+        self.val_accs = []
+        self.best_state = None
 
         # Log model info
         param_count = sum(p.numel() for p in self.model.parameters())
         logger.info(f"LSTM initialized: {hidden_size} units × {num_layers} layers, "
-                    f"BatchNorm={self.use_batch_norm}, Activation=None (LSTM internal), "
-                    f"Params={param_count:,}")
-
-    def prepare_sequences(
-        self, X: np.ndarray, y: Optional[np.ndarray] = None
-    ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
-        """
-        Transform 2D tabular data into 3D sequences for LSTM
-        Optimized for memory using stride tricks
-
-        Args:
-            X: Features array (n_samples, n_features)
-            y: Labels array (n_samples,) - optional
-
-        Returns:
-            Tuple of (X_sequences, y_sequences) where X_sequences has shape
-            (n_samples - sequence_length + 1, sequence_length, n_features)
-        """
-        n_samples, n_features = X.shape
-
-        # Use stride_tricks to avoid memory duplication during sequence creation
-        from numpy.lib.stride_tricks import sliding_window_view
-
-        # Create sliding window view
-        # Shape: (n_windows, n_features, window_size)
-        windows = sliding_window_view(
-            X, window_shape=self.sequence_length, axis=0)
-
-        # Transpose to get (n_windows, window_size, n_features)
-        # Make a contiguous copy to avoid non-writable tensor warning
-        X_sequences = np.ascontiguousarray(windows.transpose(0, 2, 1))
-
-        # Handle targets - CRITICAL FIX:
-        # If we have n_samples, sliding windows create (n_samples - seq_length + 1) windows
-        # Each window i spans from [i, i+seq_length), and targets the END of the window
-        # So target index for window i is (i + seq_length - 1)
-        # This means y_sequences should be y[seq_length-1:] (length = n_samples - seq_length + 1)
-        if y is not None:
-            # y[seq_length-1:] = y[39:] for seq_length=40
-            # This has length = n_samples - seq_length + 1 = same as X_sequences
-            y_sequences = y[self.sequence_length - 1:]
-
-            # Verify alignment
-            assert len(X_sequences) == len(y_sequences), \
-                f"X_sequences ({len(X_sequences)}) and y_sequences ({len(y_sequences)}) length mismatch!"
-
-            return X_sequences, y_sequences
-
-        return X_sequences, None
+                    f"BatchNorm={use_batch_norm}, Dropout={dropout}, Params={param_count:,}")
 
     def fit(
         self,
@@ -354,539 +259,358 @@ class LSTMSequenceModel:
         save_plots_path: Optional[str] = None,
     ):
         """
-        Train LSTM model
-
-        Args:
-            X: Training features (n_samples, n_features)
-            y: Training labels (n_samples,)
-            X_val: Validation features (optional)
-            y_val: Validation labels (optional)
+        Train LSTM model with TRUE LAZY LOADING (no 3D array creation).
         """
-        # logger.info("Starting LSTM training")
-
-        # Normalize features
+        # 1. Scale Data (convert to float32 to save RAM)
+        X = X.astype(np.float32)
         X_scaled = self.scaler.fit_transform(X)
 
-        # Prepare sequences
-        X_seq, y_seq = self.prepare_sequences(X_scaled, y)
-        # logger.info(f"Prepared {len(X_seq)} training sequences")
+        # 2. Create Lazy Datasets (NO 3D Array Creation!)
+        train_dataset = LazySequenceDataset(X_scaled, y, self.sequence_length)
 
-        # Convert to tensors (keep on CPU initially for DataLoader)
-        X_train_tensor = torch.FloatTensor(X_seq)
-        y_train_tensor = torch.LongTensor(y_seq)
-
-        # Validation data (keep on CPU initially)
-        if X_val is not None and y_val is not None:
-            X_val_scaled = self.scaler.transform(X_val)
-            X_val_seq, y_val_seq = self.prepare_sequences(X_val_scaled, y_val)
-            X_val_tensor = torch.FloatTensor(X_val_seq)
-            y_val_tensor = torch.LongTensor(y_val_seq)
-        else:
-            X_val_tensor = None
-            y_val_tensor = None
-
-        # Create DataLoader for efficient batching
-        from torch.utils.data import Dataset, DataLoader
-        import gc
-
-        # Lazy Dataset to avoid memory duplication
-        class LazyWindowDataset(Dataset):
-            def __init__(self, X, y, sequence_length):
-                self.X = torch.FloatTensor(X)  # Keep 2D tensor
-                self.y = torch.LongTensor(y) if y is not None else None
-                self.seq_len = sequence_length
-
-            def __len__(self):
-                return len(self.X) - self.seq_len
-
-            def __getitem__(self, idx):
-                # Slice window on the fly
-                x_window = self.X[idx: idx + self.seq_len]
-                if self.y is not None:
-                    y_label = self.y[idx + self.seq_len - 1]
-                    return x_window, y_label
-                return x_window
-
-        # Create dataset using LazyWindowDataset
-        # Note: X_scaled is numpy, convert to tensor inside dataset
-        train_dataset = LazyWindowDataset(X_scaled, y, self.sequence_length)
-
-        # Validation data
-        if X_val is not None and y_val is not None:
-            X_val_scaled = self.scaler.transform(X_val)
-            val_dataset = LazyWindowDataset(
-                X_val_scaled, y_val, self.sequence_length)
-        else:
-            val_dataset = None
-
-        # Clean up intermediate arrays to free memory
-        # X_scaled is now held by dataset (as tensor), so we can delete the numpy version
+        # Free original arrays
         del X_scaled
         gc.collect()
 
         train_loader = DataLoader(
             train_dataset,
             batch_size=self.batch_size,
-            shuffle=False,  # CRITICAL: Never shuffle time series for LSTM
-            num_workers=GPU_CONFIG['num_workers'],  # Prefetch data to GPU
-            pin_memory=GPU_CONFIG['pin_memory'],  # Faster GPU transfer
-            # Keep workers alive
-            persistent_workers=GPU_CONFIG['num_workers'] > 0,
+            shuffle=False,  # CRITICAL: Never shuffle time series
+            num_workers=0,  # Avoid memory duplication from multiprocessing
+            pin_memory=True if torch.cuda.is_available() else False,
         )
 
-        # Initialize histories for diagnostics
-        self.train_losses = []
-        self.val_losses = []
-        self.train_accs = []
-        self.val_accs = []
-
-        # CLASS WEIGHTS: Dynamic calculation based on training data
-        # Handles both Binary (Buy/Sell) and Multi-class (Buy/Sell/Hold)
-        from sklearn.utils.class_weight import compute_class_weight
-
-        # Ensure y is numpy array
-        y_np = np.array(y)
-        unique_classes = np.unique(y_np)
-
-        # Calculate balanced weights
-        weights = compute_class_weight(
-            class_weight='balanced',
-            classes=unique_classes,
-            y=y_np
-        )
-
-        # Map to full weight tensor (handle missing classes if any)
-        full_weights = np.ones(self.num_classes, dtype=np.float32)
-        for cls, weight in zip(unique_classes, weights):
-            if int(cls) < self.num_classes:
-                full_weights[int(cls)] = weight
-
-        class_weights = torch.tensor(
-            full_weights, device=self.device, dtype=torch.float32)
-        logger.info(
-            f"Using dynamic class weights: {class_weights.cpu().numpy()}")
-
-        # Loss function with class weights and label smoothing
-        criterion = nn.CrossEntropyLoss(
-            weight=class_weights,
-            label_smoothing=self.label_smoothing
-        )
-
-        # Use AdamW optimizer - better weight decay implementation
-        # AdamW decouples weight decay from gradient update (fixes rising loss)
-        optimizer = optim.AdamW(
-            self.model.parameters(),
-            lr=self.learning_rate,
-            betas=(self.beta1, self.beta2),
-            weight_decay=self.l2_lambda,
-            eps=1e-8,
-        )
-
-        # Learning rate scheduler with warmup to prevent early instability
-        # Phase 1: Linear warmup for lr_warmup_epochs (1 epoch to warm up quickly)
-        # Phase 2: Cosine annealing decay
-        def lr_lambda(epoch):
-            if epoch < self.lr_warmup_epochs:
-                # Linear warmup from 50% to 100% of learning rate (faster ramp-up)
-                # Without activation, model needs stronger initial gradients
-                return 0.5 + 0.5 * (epoch / self.lr_warmup_epochs)
-            else:
-                # Cosine annealing after warmup
-                progress = (epoch - self.lr_warmup_epochs) / \
-                    max(1, self.epochs - self.lr_warmup_epochs)
-                return self.lr_min_factor + (1 - self.lr_min_factor) * (1 + np.cos(np.pi * progress)) / 2
-
-        scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
-
-        # Training loop
-        best_val_loss = float('inf')
-        best_val_acc = 0.0
-        patience_counter = 0
-
-        # Validation loader (create once)
+        # Validation data
         val_loader = None
-        if val_dataset is not None:
+        if X_val is not None and y_val is not None:
+            X_val = X_val.astype(np.float32)
+            X_val_scaled = self.scaler.transform(X_val)
+            val_dataset = LazySequenceDataset(
+                X_val_scaled, y_val, self.sequence_length)
             val_loader = DataLoader(
                 val_dataset,
                 batch_size=self.batch_size,
                 shuffle=False,
                 num_workers=0,
-                pin_memory=False
             )
+            del X_val_scaled
+            gc.collect()
+
+        # 3. Class Weights (handle imbalance)
+        y_np = np.array(y)
+        unique_classes = np.unique(y_np)
+        weights = compute_class_weight(
+            'balanced', classes=unique_classes, y=y_np)
+        full_weights = np.ones(self.num_classes, dtype=np.float32)
+        for cls, weight in zip(unique_classes, weights):
+            if int(cls) < self.num_classes:
+                full_weights[int(cls)] = weight
+        class_weights = torch.tensor(
+            full_weights, device=self.device, dtype=torch.float32)
+        logger.info(
+            f"Using dynamic class weights: {class_weights.cpu().numpy()}")
+
+        # 4. Loss & Optimizer
+        criterion = nn.CrossEntropyLoss(
+            weight=class_weights, label_smoothing=self.label_smoothing)
+        optimizer = optim.AdamW(
+            self.model.parameters(),
+            lr=self.learning_rate,
+            betas=(self.beta1, self.beta2),
+            weight_decay=self.l2_lambda,
+        )
+
+        # 5. Learning Rate Scheduler with Warmup
+        def lr_lambda(epoch):
+            if epoch < self.lr_warmup_epochs:
+                return 0.5 + 0.5 * (epoch / self.lr_warmup_epochs)
+            else:
+                progress = (epoch - self.lr_warmup_epochs) / \
+                    max(1, self.epochs - self.lr_warmup_epochs)
+                return self.lr_min_factor + (1 - self.lr_min_factor) * (1 + np.cos(np.pi * progress)) / 2
+        scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+
+        # 6. Training Loop
+        best_val_loss = float('inf')
+        patience_counter = 0
 
         for epoch in range(self.epochs):
             self.model.train()
             total_loss = 0
             train_correct = 0
             train_total = 0
-            optimizer.zero_grad()
 
-            # Mini-batch training with DataLoader (parallel data loading)
-            for batch_idx, (X_batch, y_batch) in enumerate(train_loader):
-                # Move batch to GPU
-                X_batch = X_batch.to(self.device, non_blocking=True)
-                y_batch = y_batch.to(self.device, non_blocking=True)
+            for batch_idx, (batch_X, batch_y) in enumerate(train_loader):
+                batch_X = batch_X.to(self.device, non_blocking=True)
+                batch_y = batch_y.to(self.device, non_blocking=True)
 
-                # Forward pass with mixed precision
-                if self.use_amp:
+                optimizer.zero_grad()
+
+                # Forward pass (with optional AMP)
+                if self.use_amp and self.scaler_amp:
                     with autocast('cuda'):
-                        outputs = self.model(X_batch)
-                        loss = criterion(outputs, y_batch)
-
-                        # Add L1 regularization (Lasso) manually
+                        outputs = self.model(batch_X)
+                        loss = criterion(outputs, batch_y)
                         if self.l1_lambda > 0:
                             l1_penalty = sum(p.abs().sum()
                                              for p in self.model.parameters())
                             loss = loss + self.l1_lambda * l1_penalty
 
-                    # Scale loss for gradient accumulation
-                    loss = loss / self.gradient_accumulation_steps
-                    # Backward pass with scaled gradients
                     self.scaler_amp.scale(loss).backward()
-
-                    # Update weights after accumulating gradients
-                    if (batch_idx + 1) % self.gradient_accumulation_steps == 0:
-                        # Unscale gradients and clip them
-                        self.scaler_amp.unscale_(optimizer)
-                        torch.nn.utils.clip_grad_norm_(
-                            self.model.parameters(), max_norm=self.max_grad_norm)
-
-                        self.scaler_amp.step(optimizer)
-                        self.scaler_amp.update()
-                        optimizer.zero_grad()
+                    self.scaler_amp.unscale_(optimizer)
+                    torch.nn.utils.clip_grad_norm_(
+                        self.model.parameters(), max_norm=self.max_grad_norm)
+                    self.scaler_amp.step(optimizer)
+                    self.scaler_amp.update()
                 else:
-                    # Standard training without AMP
-                    outputs = self.model(X_batch)
-                    loss = criterion(outputs, y_batch)
-
-                    # Add L1 regularization (Lasso) manually
+                    outputs = self.model(batch_X)
+                    loss = criterion(outputs, batch_y)
                     if self.l1_lambda > 0:
                         l1_penalty = sum(p.abs().sum()
                                          for p in self.model.parameters())
                         loss = loss + self.l1_lambda * l1_penalty
 
-                    loss = loss / self.gradient_accumulation_steps
                     loss.backward()
+                    torch.nn.utils.clip_grad_norm_(
+                        self.model.parameters(), max_norm=self.max_grad_norm)
+                    optimizer.step()
 
-                    if (batch_idx + 1) % self.gradient_accumulation_steps == 0:
-                        # Clip gradients to prevent exploding gradients
-                        torch.nn.utils.clip_grad_norm_(
-                            self.model.parameters(), max_norm=self.max_grad_norm)
-                        optimizer.step()
-                        optimizer.zero_grad()
+                total_loss += loss.item()
 
-                total_loss += loss.item() * self.gradient_accumulation_steps
-
-                # Calculate training accuracy for this batch
+                # Training accuracy
                 with torch.no_grad():
                     preds = torch.argmax(outputs, dim=1)
-                    train_correct += (preds == y_batch).sum().item()
-                    train_total += y_batch.size(0)
+                    train_correct += (preds == batch_y).sum().item()
+                    train_total += batch_y.size(0)
 
-            # Calculate average loss (number of batches)
-            num_batches = len(train_loader)
-            avg_loss = total_loss / num_batches
-
-            # Calculate average training accuracy
+            avg_train_loss = total_loss / len(train_loader)
             train_acc = train_correct / train_total if train_total > 0 else 0.0
-
-            # Record training metrics
-            self.train_losses.append(avg_loss)
+            self.train_losses.append(avg_train_loss)
             self.train_accs.append(train_acc)
 
             # Validation
-            if val_loader is not None:
+            avg_val_loss = 0
+            val_acc = 0
+            if val_loader:
                 self.model.eval()
                 val_loss = 0
                 val_correct = 0
                 val_total = 0
 
                 with torch.no_grad():
-                    for X_v, y_v in val_loader:
-                        X_v = X_v.to(self.device, non_blocking=True)
-                        y_v = y_v.to(self.device, non_blocking=True)
-
-                        outputs = self.model(X_v)
-                        loss = criterion(outputs, y_v)
+                    for batch_X, batch_y in val_loader:
+                        batch_X = batch_X.to(self.device, non_blocking=True)
+                        batch_y = batch_y.to(self.device, non_blocking=True)
+                        outputs = self.model(batch_X)
+                        loss = criterion(outputs, batch_y)
                         val_loss += loss.item()
-
                         preds = torch.argmax(outputs, dim=1)
-                        val_correct += (preds == y_v).sum().item()
-                        val_total += y_v.size(0)
+                        val_correct += (preds == batch_y).sum().item()
+                        val_total += batch_y.size(0)
 
                 avg_val_loss = val_loss / len(val_loader)
                 val_acc = val_correct / val_total
-
-                # Record validation metrics
                 self.val_losses.append(avg_val_loss)
                 self.val_accs.append(val_acc)
 
-                # Check for improvement
+                # Early stopping check
                 if avg_val_loss < best_val_loss:
                     best_val_loss = avg_val_loss
-                    best_val_acc = val_acc
                     patience_counter = 0
+                    # Save best state
+                    self.best_state = {k: v.cpu().clone()
+                                       for k, v in self.model.state_dict().items()}
                 else:
                     patience_counter += 1
-            else:
-                # No validation set
-                avg_val_loss = 0
-                val_acc = 0
-            # Step the learning rate scheduler (CosineAnnealing steps every epoch)
+
             scheduler.step()
 
-            # Log every epoch for full visibility during training
-            if val_loader is not None:
+            # Logging
+            if val_loader:
                 logger.info(
                     f"    LSTM Epoch {epoch+1:3d}/{self.epochs} | "
-                    f"Train Loss: {avg_loss:.4f}, Acc: {train_acc:.3f} | "
+                    f"Train Loss: {avg_train_loss:.4f}, Acc: {train_acc:.3f} | "
                     f"Val Loss: {avg_val_loss:.4f}, Acc: {val_acc:.3f}"
                 )
             else:
                 logger.info(
-                    f"    LSTM Epoch {epoch+1:3d}/{self.epochs} | Train Loss: {avg_loss:.4f}, Acc: {train_acc:.3f}")
+                    f"    LSTM Epoch {epoch+1:3d}/{self.epochs} | Train Loss: {avg_train_loss:.4f}, Acc: {train_acc:.3f}")
 
             # Early stopping
-            if val_loader is not None:
-                if patience_counter >= self.early_stopping_patience:
-                    logger.info(
-                        f"Early stopping at epoch {epoch+1} - Val Loss: {avg_val_loss:.4f}")
-                    break
+            if val_loader and patience_counter >= self.early_stopping_patience:
+                logger.info(
+                    f"Early stopping at epoch {epoch+1} - Best Val Loss: {best_val_loss:.4f}")
+                if self.best_state:
+                    self.model.load_state_dict(self.best_state)
+                break
 
         self.is_fitted = True
-        # logger.info("LSTM training completed")
-
-        # Optionally save training curves (loss & accuracy)
-        if save_plots_path is not None:
-            try:
-                self._save_training_plots(save_plots_path)
-            except Exception as e:
-                logger.warning(f"Failed to save training plots: {e}")
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     def predict_proba(self, X: np.ndarray) -> np.ndarray:
         """
-        Predict class probabilities (memory optimized with batching)
-
-        Args:
-            X: Features array (n_samples, n_features)
-
-        Returns:
-            Probability array (n_samples, n_classes)
+        Predict class probabilities with memory-optimized lazy loading.
         """
-        import gc
-
         if not self.is_fitted:
             raise ValueError("Model not fitted. Call fit() first.")
 
-        # Normalize features
-        X_scaled = self.scaler.transform(X).astype(np.float32)
+        # Scale data
+        X = X.astype(np.float32)
+        X_scaled = self.scaler.transform(X)
 
-        # Prepare sequences
-        X_seq, _ = self.prepare_sequences(X_scaled)
-        del X_scaled
-        gc.collect()
+        # Use lazy dataset for inference too
+        dataset = LazySequenceDataset(X_scaled, None, self.sequence_length)
+        loader = DataLoader(dataset, batch_size=1024,
+                            shuffle=False, num_workers=0)
 
-        # Predict in batches to avoid OOM
         self.model.eval()
-        batch_size = 512
         all_probs = []
 
         with torch.no_grad():
-            for i in range(0, len(X_seq), batch_size):
-                batch = torch.FloatTensor(
-                    X_seq[i:i+batch_size]).to(self.device)
+            for batch_X in loader:
+                batch_X = batch_X.to(self.device)
 
-                # Handle DataParallel wrapper - it only exposes forward(), not predict_proba()
+                # Handle DataParallel wrapper
                 if isinstance(self.model, nn.DataParallel):
-                    logits = self.model(batch)
+                    logits = self.model(batch_X)
                     probs = torch.softmax(logits, dim=1)
                 else:
-                    probs = self.model.predict_proba(batch)
+                    probs = self.model.predict_proba(batch_X)
 
                 all_probs.append(probs.cpu().numpy().astype(np.float32))
-                del batch, probs
+
+                del batch_X, probs
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
+
+        del X_scaled
+        gc.collect()
 
         return np.vstack(all_probs)
 
     def predict(self, X: np.ndarray) -> np.ndarray:
-        """
-        Predict class labels
-
-        Args:
-            X: Features array (n_samples, n_features)
-
-        Returns:
-            Predicted labels (n_samples,)
-        """
+        """Predict class labels."""
         probs = self.predict_proba(X)
         return np.argmax(probs, axis=1)
 
     def get_final_hidden_states(self, X: np.ndarray) -> np.ndarray:
-        """
-        Get final hidden states for use in meta-learner
-
-        Args:
-            X: Features array (n_samples, n_features)
-
-        Returns:
-            Hidden states (n_samples, hidden_size)
-        """
+        """Get final hidden states for use in meta-learner."""
         if not self.is_fitted:
             raise ValueError("Model not fitted. Call fit() first.")
 
-        # Normalize features
+        X = X.astype(np.float32)
         X_scaled = self.scaler.transform(X)
 
-        # Prepare sequences
-        X_seq, _ = self.prepare_sequences(X_scaled)
+        dataset = LazySequenceDataset(X_scaled, None, self.sequence_length)
+        loader = DataLoader(dataset, batch_size=1024,
+                            shuffle=False, num_workers=0)
 
-        # Convert to tensor
-        X_tensor = torch.FloatTensor(X_seq).to(self.device)
-
-        # Get hidden states
         self.model.eval()
+        all_hidden = []
+
         with torch.no_grad():
-            # Handle DataParallel wrapper - it can't handle return_hidden kwarg or tuple returns
-            if isinstance(self.model, nn.DataParallel):
-                # Access underlying module directly for inference
-                _, hidden = self.model.module(X_tensor, return_hidden=True)
-            else:
-                _, hidden = self.model(X_tensor, return_hidden=True)
+            for batch_X in loader:
+                batch_X = batch_X.to(self.device)
 
-        return hidden.cpu().numpy()
+                if isinstance(self.model, nn.DataParallel):
+                    # DataParallel doesn't support return_hidden
+                    _, hidden = self.model.module.forward(
+                        batch_X, return_hidden=True)
+                else:
+                    _, hidden = self.model.forward(batch_X, return_hidden=True)
 
-    def _save_training_plots(self, out_prefix: str):
-        """Save loss and accuracy curves to files with given prefix.
+                all_hidden.append(hidden.cpu().numpy().astype(np.float32))
 
-        Args:
-            out_prefix: Path prefix (without extension) where plots will be saved.
-                        Two files will be created: <out_prefix>_loss.png and
-                        <out_prefix>_acc.png
-        """
+        del X_scaled
+        gc.collect()
+
+        return np.vstack(all_hidden)
+
+    def save_model(self, path: str):
+        """Save model state and scaler."""
+        import joblib
+
+        # Save PyTorch model
+        model_state = self.model.module.state_dict() if isinstance(
+            self.model, nn.DataParallel) else self.model.state_dict()
+        torch.save({
+            'model_state_dict': model_state,
+            'input_size': self.input_size,
+            'sequence_length': self.sequence_length,
+            'hidden_size': self.hidden_size,
+            'num_layers': self.num_layers,
+            'num_classes': self.num_classes,
+            'dropout': self.dropout,
+            'bidirectional': self.bidirectional,
+            'use_batch_norm': self.use_batch_norm,
+        }, f"{path}_lstm.pt")
+
+        # Save scaler
+        joblib.dump(self.scaler, f"{path}_scaler.joblib")
+        logger.info(f"LSTM model saved to {path}_lstm.pt")
+
+    def load_model(self, path: str):
+        """Load model state and scaler."""
+        import joblib
+
+        # Load checkpoint
+        checkpoint = torch.load(f"{path}_lstm.pt", map_location=self.device)
+
+        # Reinitialize model with saved params
+        self.model = LSTMSequenceClassifier(
+            input_size=checkpoint['input_size'],
+            hidden_size=checkpoint['hidden_size'],
+            num_layers=checkpoint['num_layers'],
+            num_classes=checkpoint['num_classes'],
+            dropout=checkpoint['dropout'],
+            bidirectional=checkpoint['bidirectional'],
+            use_batch_norm=checkpoint['use_batch_norm'],
+        ).to(self.device)
+
+        self.model.load_state_dict(checkpoint['model_state_dict'])
+
+        # Load scaler
+        self.scaler = joblib.load(f"{path}_scaler.joblib")
+        self.is_fitted = True
+        logger.info(f"LSTM model loaded from {path}_lstm.pt")
+
+    def _save_training_plots(self, save_path: str):
+        """Save training curves."""
         try:
             import matplotlib
             matplotlib.use('Agg')
             import matplotlib.pyplot as plt
-        except Exception:
-            raise RuntimeError("matplotlib not available in environment")
 
-        # Loss curve
-        plt.figure(figsize=(8, 5))
-        if hasattr(self, 'train_losses') and len(self.train_losses) > 0:
-            plt.plot(self.train_losses, label='Train Loss')
-        if hasattr(self, 'val_losses') and len(self.val_losses) > 0:
-            plt.plot(self.val_losses, label='Val Loss')
-        plt.xlabel('Epoch')
-        plt.ylabel('Loss')
-        plt.title('LSTM Loss Curve')
-        plt.legend()
-        plt.grid(True)
-        loss_path = f"{out_prefix}_loss.png"
-        plt.savefig(loss_path, bbox_inches='tight')
-        plt.close()
+            fig, axes = plt.subplots(1, 2, figsize=(12, 4))
 
-        # Accuracy curve
-        plt.figure(figsize=(8, 5))
-        if hasattr(self, 'train_accs') and len(self.train_accs) > 0:
-            plt.plot(self.train_accs, label='Train Acc')
-        if hasattr(self, 'val_accs') and len(self.val_accs) > 0:
-            plt.plot(self.val_accs, label='Val Acc')
-        plt.xlabel('Epoch')
-        plt.ylabel('Accuracy')
-        plt.title('LSTM Accuracy Curve')
-        plt.legend()
-        plt.grid(True)
-        acc_path = f"{out_prefix}_acc.png"
-        plt.savefig(acc_path, bbox_inches='tight')
-        plt.close()
+            # Loss plot
+            axes[0].plot(self.train_losses, label='Train Loss')
+            if self.val_losses:
+                axes[0].plot(self.val_losses, label='Val Loss')
+            axes[0].set_xlabel('Epoch')
+            axes[0].set_ylabel('Loss')
+            axes[0].set_title('Training Loss')
+            axes[0].legend()
 
-    def save_model(self, filepath: str):
-        """Save model to disk"""
-        torch.save({
-            'model_state_dict': self.model.state_dict(),
-            'scaler': self.scaler,
-            'config': {
-                'input_size': self.input_size,
-                'sequence_length': self.sequence_length,
-                'hidden_size': self.hidden_size,
-                'num_layers': self.num_layers,
-                'num_classes': self.num_classes,
-                'dropout': self.dropout,
-            },
-        }, filepath)
-        logger.info(f"LSTM model saved to {filepath}")
+            # Accuracy plot
+            axes[1].plot(self.train_accs, label='Train Acc')
+            if self.val_accs:
+                axes[1].plot(self.val_accs, label='Val Acc')
+            axes[1].set_xlabel('Epoch')
+            axes[1].set_ylabel('Accuracy')
+            axes[1].set_title('Training Accuracy')
+            axes[1].legend()
 
-    def load_model(self, filepath: str):
-        """Load model from disk"""
-        # PyTorch 2.6+ changed weights_only default to True
-        # Set to False to load models with sklearn objects (MinMaxScaler)
-        checkpoint = torch.load(
-            filepath, map_location=self.device, weights_only=False)
-
-        # Restore config
-        config = checkpoint['config']
-        self.input_size = config['input_size']
-        self.sequence_length = config['sequence_length']
-        self.hidden_size = config['hidden_size']
-        self.num_layers = config['num_layers']
-        self.num_classes = config['num_classes']
-        self.dropout = config['dropout']
-
-        # Rebuild model
-        self.model = LSTMSequenceClassifier(
-            input_size=self.input_size,
-            hidden_size=self.hidden_size,
-            num_layers=self.num_layers,
-            num_classes=self.num_classes,
-            dropout=self.dropout,
-        ).to(self.device)
-
-        # Load state
-        self.model.load_state_dict(checkpoint['model_state_dict'])
-        self.scaler = checkpoint['scaler']
-        self.is_fitted = True
-
-        logger.info(f"LSTM model loaded from {filepath}")
+            plt.tight_layout()
+            plt.savefig(f"{save_path}_lstm_training.png", dpi=100)
+            plt.close()
+            logger.info(
+                f"Training plots saved to {save_path}_lstm_training.png")
+        except Exception as e:
+            logger.warning(f"Could not save training plots: {e}")
 
 
-if __name__ == "__main__":
-    # Example usage
-    from sklearn.datasets import make_classification
-    from sklearn.model_selection import train_test_split
-
-    # Generate sample time series data
-    X, y = make_classification(
-        n_samples=5000,
-        n_features=30,
-        n_informative=20,
-        n_classes=3,
-        random_state=42,
-    )
-
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, shuffle=False  # No shuffle for time series
-    )
-
-    # Initialize and train LSTM
-    lstm_model = LSTMSequenceModel(
-        input_size=X.shape[1],
-        sequence_length=22,
-        hidden_size=128,
-        num_layers=2,
-        epochs=50,
-    )
-
-    lstm_model.fit(X_train, y_train)
-
-    # Predictions
-    y_pred_proba = lstm_model.predict_proba(X_test)
-    y_pred = lstm_model.predict(X_test)
-
-    # Get hidden states for meta-learner
-    hidden_states = lstm_model.get_final_hidden_states(X_test)
-
-    print(f"Predictions shape: {y_pred.shape}")
-    print(f"Probabilities shape: {y_pred_proba.shape}")
-    print(f"Hidden states shape: {hidden_states.shape}")
+# Backward compatibility alias
+LSTMModel = LSTMSequenceModel

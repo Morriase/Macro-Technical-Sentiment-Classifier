@@ -1,4 +1,4 @@
-# LSTM Convergence Fix - Senior MLOps Engineer Recommendations
+# LSTM Convergence Fix + RAM Optimization - Senior MLOps Engineer Recommendations
 
 ## Problem Analysis
 The training logs showed:
@@ -177,3 +177,88 @@ Your meta-learner (XGBoost) receives:
 - Senior MLOps Engineer analysis: resources/Try_this.md
 - LSTM best practices: resources/LSTM_NUANCES.md
 - Financial ML patterns: Double Descent, Flat Minima, Regime Learning
+
+
+---
+
+## RAM Optimization (Added)
+
+### The Problem: Time Series RAM Explosion
+```
+2D Array (Input): 2M rows × 33 features × 8 bytes ≈ 0.5 GB (Manageable)
+3D Array (LSTM):  2M rows × 40 seq × 33 features × 4 bytes ≈ 10.5 GB (CRASH!)
+```
+
+When you add OS overhead, Python overhead, and model weights → exceeds 16GB Kaggle limit.
+
+### Root Cause
+The old code called `prepare_sequences()` which created the massive 10GB 3D array in RAM **before** training even started.
+
+### The Fix: True Lazy Loading
+
+**Completely rewrote `src/models/lstm_model.py`** with a new `LazySequenceDataset` class:
+
+```python
+class LazySequenceDataset(Dataset):
+    """
+    Zero-copy dataset that slices sequences on-the-fly.
+    Keeps data in 2D to save 40x RAM.
+    """
+    def __init__(self, X, y, sequence_length):
+        # Store as float32 (50% RAM savings)
+        self.X = torch.tensor(X.astype(np.float32), dtype=torch.float32)
+        self.y = torch.tensor(y, dtype=torch.long) if y is not None else None
+        self.seq_len = sequence_length
+
+    def __len__(self):
+        return len(self.X) - self.seq_len
+
+    def __getitem__(self, idx):
+        # Create 3D view ONLY for this specific batch item
+        x_window = self.X[idx : idx + self.seq_len]
+        if self.y is not None:
+            y_label = self.y[idx + self.seq_len - 1]
+            return x_window, y_label
+        return x_window
+```
+
+### Key Changes
+
+| Component | Before | After |
+|-----------|--------|-------|
+| Data Storage | 3D array in RAM (10GB) | 2D tensor (0.5GB) |
+| Sequence Creation | `prepare_sequences()` upfront | On-the-fly per batch |
+| Data Type | float64 | float32 (50% savings) |
+| Sample Limit | 5M samples | 500K samples |
+
+### Memory Config Updated
+```python
+# src/config.py
+"memory": {
+    "max_train_samples": 500000,    # REDUCED from 5M
+    "max_val_samples": 100000,      # REDUCED from 1M
+    "use_float32": True,            # 50% RAM savings
+    "aggressive_gc": True,          # GC after each fold
+}
+```
+
+### RAM Usage Comparison
+
+| Stage | Before | After |
+|-------|--------|-------|
+| Data Loading | 0.5 GB | 0.5 GB |
+| Sequence Prep | +10.5 GB | +0 GB (lazy) |
+| Model Weights | +0.1 GB | +0.1 GB |
+| **Total** | **~12 GB** | **~0.6 GB** |
+
+### Files Modified for RAM Fix
+
+1. **src/models/lstm_model.py** - Complete rewrite with:
+   - `LazySequenceDataset` class (true lazy loading)
+   - Removed `prepare_sequences()` from training path
+   - All data stays 2D, sequences sliced per batch
+   - float32 throughout
+
+2. **src/config.py** - Memory limits:
+   - `max_train_samples`: 5M → 500K
+   - `max_val_samples`: 1M → 100K

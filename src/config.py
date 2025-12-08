@@ -208,11 +208,13 @@ ENSEMBLE_CONFIG = {
         "random_state": 42,
         "early_stopping_rounds": 30,
     },
-    # Memory management settings
+    # Memory management settings - CRITICAL for Kaggle 16GB RAM limit
+    # RAM Math: 2M rows × 40 seq × 33 features × 4 bytes = 10.5 GB (too much!)
+    # Solution: Cap samples + True Lazy Loading (no 3D array creation)
     "memory": {
-        "max_train_samples": 5000000,    # Use all data (was 500k)
-        "max_val_samples": 1000000,      # Use all data (was 100k)
-        "use_float32": True,            # Use float32 instead of float64
+        "max_train_samples": 500000,    # REDUCED: 500k is enough for convergence
+        "max_val_samples": 100000,      # REDUCED: 100k for validation
+        "use_float32": True,            # Use float32 (50% RAM savings)
         "aggressive_gc": True,          # Garbage collect after each fold
     },
 }
