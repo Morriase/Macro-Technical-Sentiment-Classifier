@@ -278,7 +278,7 @@ class LSTMSequenceModel:
         # Log model info
         param_count = sum(p.numel() for p in self.model.parameters())
         logger.info(f"LSTM initialized: {hidden_size} units × {num_layers} layers, "
-                    f"BatchNorm={use_batch_norm}, Activation={hidden_activation}, "
+                    f"BatchNorm={use_batch_norm}, Activation=None (LSTM internal), "
                     f"Params={param_count:,}")
 
     def prepare_sequences(

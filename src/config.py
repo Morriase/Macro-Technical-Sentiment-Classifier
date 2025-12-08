@@ -162,9 +162,11 @@ ENSEMBLE_CONFIG = {
             # Elastic Net Regularization (L1 + L2)
             # Combines L1 (Lasso) for feature selection and L2 (Ridge) for weight stability.
             # Helps combat overfitting and stabilizes training (prevents spikes).
-            "l1_lambda": 1e-7,          # L1: Forces irrelevant weights to zero (Sparsity) - Author's value
-            "l2_lambda": 1e-5,          # L2: Penalizes large weights (Stability) - Author's value
-            
+            # L1: Forces irrelevant weights to zero (Sparsity) - Author's value
+            "l1_lambda": 1e-7,
+            # L2: Penalizes large weights (Stability) - Author's value
+            "l2_lambda": 1e-5,
+
             "dropout": 0.3,             # Dropout rate (0.3 to prevent spikes)
             "label_smoothing": 0.05,    # Reduced smoothing
             # Learning rate - increased for learning without activation
