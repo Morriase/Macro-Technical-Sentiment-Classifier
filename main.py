@@ -443,44 +443,28 @@ class ForexClassifierPipeline:
         self.df_features["target_class"] = self.df_features["target"].astype(
             int)
 
-        # FILTERING: Remove "Hold" signals (small moves) from training data
-        # User feedback: "feature engineering will still make hold signals in the training data"
-        # We must filter out the noise (small moves) so the model trains on CLEAR signals.
+        # CRITICAL FIX: DO NOT FILTER ROWS - This breaks LSTM temporal learning!
+        # Senior MLOps Engineer: "You cannot filter rows before feeding them to an LSTM.
+        # An LSTM learns temporal transitions (t1 → t2 → t3). If you filter out 73% of
+        # small moves, you are feeding the LSTM disjointed time jumps (e.g., Monday 10:00 AM,
+        # then the next row is Tuesday 2:00 PM). It cannot learn market physics from broken time."
+        #
+        # SOLUTION: Keep ALL data continuous. Use class_weights (already implemented in
+        # lstm_model.py) to de-prioritize small moves instead of deleting them.
+        # This allows LSTM to learn regime transitions (low volatility → breakout patterns).
 
-        if min_move_pips is not None:
-            threshold = min_move_pips
-            logger.info(
-                f"Filtering training data: Removing moves < {threshold} pips")
-
-            # Calculate absolute return in pips
+        if min_move_pips is not None and min_move_pips > 0:
+            # Log what we WOULD have filtered, but DON'T actually filter
             abs_return_pips = self.df_features["forward_return_pips"].abs()
-
-            # Keep only significant moves
-            initial_len = len(self.df_features)
-            self.df_features = self.df_features[abs_return_pips >= threshold].copy(
-            )
-            filtered_len = len(self.df_features)
-
+            would_filter = (abs_return_pips < min_move_pips).sum()
+            total = len(self.df_features)
             logger.info(
-                f"Filtered out {initial_len - filtered_len} small-move samples ({((initial_len - filtered_len)/initial_len)*100:.1f}%)")
+                f"⚠ Data Continuity Mode: Keeping ALL {total} samples (would have filtered {would_filter} = {would_filter/total*100:.1f}%)")
+            logger.info(
+                f"  → Small moves kept for LSTM temporal learning (class_weights handle imbalance)")
         else:
-            # ATR-based filtering
-            atr_col = "atr_14"
-            if atr_col in self.df_features.columns:
-                threshold_series = (
-                    self.df_features[atr_col] * pip_multiplier * atr_multiplier)
-                logger.info(
-                    f"Filtering training data: Removing moves < {atr_multiplier}x ATR")
-
-                abs_return_pips = self.df_features["forward_return_pips"].abs()
-
-                initial_len = len(self.df_features)
-                self.df_features = self.df_features[abs_return_pips >= threshold_series].copy(
-                )
-                filtered_len = len(self.df_features)
-
-                logger.info(
-                    f"Filtered out {initial_len - filtered_len} small-move samples ({((initial_len - filtered_len)/initial_len)*100:.1f}%)")
+            logger.info(
+                f"✓ Data Continuity Mode: Keeping ALL {len(self.df_features)} samples for LSTM temporal learning")
 
         # Drop future data
         self.df_features.dropna(subset=["forward_close"], inplace=True)

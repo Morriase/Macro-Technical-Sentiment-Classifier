@@ -95,38 +95,38 @@ class HybridEnsemble:
         # Tuning Focus: Reduce overfitting, improve generalization
         lstm_config = ENSEMBLE_CONFIG.get("base_learners", {}).get("lstm", {})
         self.lstm_params = lstm_params or {
-            # TUNED: 40 → 20 (reduce overfitting, shorter sequences)
-            "sequence_length": lstm_config.get("sequence_length", 20),
-            # MQL5 STANDARD PARAMETERS (from LSTM_NUANCES.md)
+            # OPTIMIZED PARAMETERS for FX convergence (Senior MLOps Engineer recommendations)
             "sequence_length": lstm_config.get("sequence_length", 40),
-            "hidden_size": lstm_config.get("hidden_size", 40),
+            # Increased capacity
+            "hidden_size": lstm_config.get("hidden_size", 64),
             "num_layers": lstm_config.get("num_layers", 1),
             "num_classes": 2,  # BINARY: Buy/Sell
-            # CRITICAL: BatchNorm ONLY (NO Dropout) per LSTM_NUANCES.md
-            "dropout": lstm_config.get("dropout", 0.0),
+            # CRITICAL FIX: Enable BOTH BatchNorm AND Dropout for financial data
+            # "Golden Ratio" for FX
+            "dropout": lstm_config.get("dropout", 0.3),
             "use_batch_norm": lstm_config.get("use_batch_norm", True),
-            # AUTHOR'S LEARNING RATE (3e-5, NOT 1e-5)
-            "learning_rate": lstm_config.get("learning_rate", 3e-5),
-            # AUTHOR'S BATCH SIZE (1000 for Python, not 2000)
-            "batch_size": lstm_config.get("batch_size", 1000),
-            # AUTHOR'S EPOCHS (500)
+            # Faster learning with BatchNorm + Dropout
+            "learning_rate": lstm_config.get("learning_rate", 1e-4),
+            # Smaller batches = implicit regularization (flat minima)
+            "batch_size": lstm_config.get("batch_size", 128),
+            # EPOCHS
             "epochs": lstm_config.get("epochs", 500),
-            # AUTHOR'S EARLY STOPPING (5 epochs patience)
-            "early_stopping_patience": lstm_config.get("early_stopping_patience", 5),
-            # AUTHOR'S REGULARIZATION (Elastic Net: 1e-7 L1, 1e-5 L2)
+            # More patience for convergence
+            "early_stopping_patience": lstm_config.get("early_stopping_patience", 25),
+            # Aggressive regularization (10x stronger L2)
             "l1_lambda": lstm_config.get("l1_lambda", 1e-7),
-            "l2_lambda": lstm_config.get("l2_lambda", 1e-5),
+            "l2_lambda": lstm_config.get("l2_lambda", 1e-3),
             # STANDARD LABEL SMOOTHING
             "label_smoothing": lstm_config.get("label_smoothing", 0.1),
-            # AUTHOR'S WARMUP (5 epochs)
+            # WARMUP
             "lr_warmup_epochs": lstm_config.get("lr_warmup_epochs", 5),
-            # STANDARD MIN LR FACTOR
+            # MIN LR FACTOR
             "lr_min_factor": lstm_config.get("lr_min_factor", 0.01),
-            # STANDARD GRADIENT CLIPPING
+            # GRADIENT CLIPPING
             "max_grad_norm": lstm_config.get("max_grad_norm", 1.0),
             # NO GRADIENT ACCUMULATION
             "gradient_accumulation_steps": lstm_config.get("gradient_accumulation_steps", 1),
-            # UNIDIRECTIONAL (MQL5 standard)
+            # UNIDIRECTIONAL
             "bidirectional": lstm_config.get("bidirectional", False),
             # NO ACTIVATION (LSTM internal gates provide non-linearity)
             "hidden_activation": lstm_config.get("hidden_activation", None),

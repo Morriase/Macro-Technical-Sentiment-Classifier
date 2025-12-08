@@ -145,44 +145,50 @@ ENSEMBLE_CONFIG = {
             "num_class": 2,             # Changed from 3 to 2 (Buy/Sell)
         },
         "lstm": {
-            # Architecture - OPTIMIZED per MQL5 standards from LSTM_NUANCES.md
-            "sequence_length": 40,      # MQL5 standard: 40 bars (BarsToLine)
-            "hidden_size": 40,          # MQL5 standard: 40 units (HiddenLayer)
-            # MQL5 standard: 1 LSTM layer (no hidden layers)
+            # Architecture - BALANCED for convergence and generalization
+            "sequence_length": 40,      # Keep: 40 bars (1 week of H4 data)
+            "hidden_size": 64,          # INCREASED from 40 to capture complex patterns
+            # Keep: 1 LSTM layer (simpler = better generalization)
             "num_layers": 1,
             "bidirectional": False,     # Unidirectional
             # No activation (LSTM internal gates provide non-linearity)
             "hidden_activation": None,
 
-            # CRITICAL: BatchNorm ONLY (NO Dropout) per LSTM_NUANCES.md
-            # "Batch Normalization itself functions as regularization"
-            # "Dropout disrupts BN statistics" → use ONE or the OTHER, not both
-            "use_batch_norm": True,     # ENABLED - MQL5 standard, provides regularization
-            "dropout": 0.0,             # DISABLED - BatchNorm replaces dropout
+            # CRITICAL FIX: Enable BOTH BatchNorm AND Dropout for financial data
+            # In finance (stochastic, non-stationary), you need:
+            # - BatchNorm: Stabilizes gradients and internal covariate shift
+            # - Dropout: Prevents memorization of noisy candle patterns
+            # This differs from computer vision where BN replaces Dropout
+            "use_batch_norm": True,     # ENABLED - stabilizes training
+            # ENABLED - "Golden Ratio" for FX (prevents overfitting)
+            "dropout": 0.3,
 
-            # Regularization - MINIMAL per author's MQL5 implementation
-            "l1_lambda": 1e-7,          # Author's value: 1e-7 (Elastic Net)
-            "l2_lambda": 1e-5,          # Author's value: 1e-5 (Elastic Net)
+            # Regularization - AGGRESSIVE to prevent memorization
+            "l1_lambda": 1e-7,          # Keep: Elastic Net L1
+            # INCREASED from 1e-5 (10x stronger weight decay)
+            "l2_lambda": 1e-3,
 
             "label_smoothing": 0.1,     # Standard: 0.1
 
-            # Learning rate - CRITICAL per LSTM_NUANCES.md
-            # "Low learning rate due to high complexity/variance of financial data"
-            # Author uses 3e-5 or 0.0003 (same value)
-            "learning_rate": 3e-5,      # Author's value: 3e-5 (NOT 1e-4)
-            "lr_warmup_epochs": 5,      # Author's value: 5 epochs
+            # Learning rate - OPTIMIZED for BatchNorm + Dropout
+            # With BatchNorm and Swish, can train faster than 3e-5
+            # INCREASED from 3e-5 (faster convergence)
+            "learning_rate": 1e-4,
+            "lr_warmup_epochs": 5,      # Keep: 5 epochs warmup
             "lr_min_factor": 0.01,      # Min LR = 1% of initial
 
-            # Training schedule - AUTHOR'S VALUES
-            # Author's Python value: 1000 (was 10000 for MQL5)
-            "batch_size": 1000,
-            "epochs": 500,              # Author's value: 500 epochs
-            "early_stopping_patience": 5,  # Author's value: 5 epochs patience
+            # Training schedule - OPTIMIZED for convergence
+            # Smaller batches introduce noise that helps find flat minima
+            # REDUCED from 1000 (implicit regularization)
+            "batch_size": 128,
+            "epochs": 500,              # Keep: 500 epochs max
+            # INCREASED from 5 (allow more time to converge)
+            "early_stopping_patience": 25,
 
-            # Optimizer - AUTHOR'S ADAM PARAMETERS
+            # Optimizer - ADAMW with strong weight decay
             "optimizer": "adamw",       # AdamW (decoupled weight decay)
-            "beta1": 0.9,               # Author's default
-            "beta2": 0.999,             # Author's default
+            "beta1": 0.9,               # Standard
+            "beta2": 0.999,             # Standard
             "max_grad_norm": 1.0,       # Standard gradient clipping
 
             # Classification
@@ -324,7 +330,9 @@ TARGET_CONFIG = {
     "classification_type": "binary",
     # REDUCED from 24h to 8h per expert: shorter horizons more predictable from M5 data
     "forward_window_hours": 8,
-    # Fixed 4 pips (was None=ATR-based, caused 68% signals)
-    "min_move_threshold_pips": 4.0,
+    # CRITICAL FIX: Set to 0.0 to keep ALL data continuous
+    # Filtering 73% of rows breaks LSTM's temporal learning (jumps in time)
+    # Instead, use class_weights to de-prioritize small moves
+    "min_move_threshold_pips": 0.0,
     "atr_multiplier": 0.6,  # Only used if min_move_threshold_pips is None
 }

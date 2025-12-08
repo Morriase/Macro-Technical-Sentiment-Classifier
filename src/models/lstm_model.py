@@ -63,11 +63,11 @@ class LSTMSequenceClassifier(nn.Module):
         self.num_classes = num_classes
         self.bidirectional = bidirectional
 
-        # User instruction: Batch Normalization cannot be used along with Dropout
-        if dropout > 0 and use_batch_norm:
-            logger.warning(
-                "Disabling Batch Normalization because Dropout is enabled.")
-            use_batch_norm = False
+        # CRITICAL FIX: In financial time series, we NEED both BatchNorm AND Dropout
+        # BatchNorm: Stabilizes gradients and internal covariate shift
+        # Dropout: Prevents memorization of noisy candle patterns
+        # This differs from computer vision where BN replaces Dropout
+        # For stochastic financial data, both are essential for generalization
 
         self.use_batch_norm = use_batch_norm
         self.hidden_activation = hidden_activation
@@ -249,11 +249,13 @@ class LSTMSequenceModel:
         self.use_batch_norm = use_batch_norm
         self.hidden_activation = hidden_activation
 
-        # User instruction: Batch Normalization cannot be used along with Dropout
-        if self.dropout > 0 and self.use_batch_norm:
-            logger.warning(
-                "Disabling Batch Normalization because Dropout is enabled.")
-            self.use_batch_norm = False
+        # CRITICAL FIX: In financial time series, we NEED both BatchNorm AND Dropout
+        # Senior MLOps Engineer: "In Finance, you need both: BatchNorm to stabilize the
+        # gradient, and Dropout to force the model to learn robust features rather than
+        # memorizing specific candle sequences."
+        # - BatchNorm: Stabilizes internal covariate shift, allows faster learning
+        # - Dropout: Randomly breaks connections to prevent overfitting on noise
+        # This differs from computer vision where BN can replace Dropout
 
         # Device - use config or auto-detect
         if device is None:
@@ -285,7 +287,9 @@ class LSTMSequenceModel:
         self.scaler_amp = GradScaler('cuda') if self.use_amp else None
 
         # Scaler for feature normalization
-        self.scaler = MinMaxScaler(feature_range=(0, 1))
+        # CRITICAL: Use (-1, 1) range for Tanh/Swish activations
+        # Zero-centered data converges faster than (0, 1) range
+        self.scaler = MinMaxScaler(feature_range=(-1, 1))
         self.is_fitted = False
 
         # Log model info
@@ -691,14 +695,14 @@ class LSTMSequenceModel:
             for i in range(0, len(X_seq), batch_size):
                 batch = torch.FloatTensor(
                     X_seq[i:i+batch_size]).to(self.device)
-                
+
                 # Handle DataParallel wrapper - it only exposes forward(), not predict_proba()
                 if isinstance(self.model, nn.DataParallel):
                     logits = self.model(batch)
                     probs = torch.softmax(logits, dim=1)
                 else:
                     probs = self.model.predict_proba(batch)
-                
+
                 all_probs.append(probs.cpu().numpy().astype(np.float32))
                 del batch, probs
                 if torch.cuda.is_available():
