@@ -170,8 +170,9 @@ ENSEMBLE_CONFIG = {
             "lr_warmup_epochs": 5,      # Warmup epochs
             "lr_min_factor": 0.01,      # Min LR = 1% of initial
 
-            # Training schedule
-            "batch_size": 256,          # Moderate batch size
+            # Training schedule - OPTIMIZED FOR 2x T4 GPUs
+            # Large batch = saturate GPU, faster training
+            "batch_size": 2048,         # BIG batch to saturate 2x T4 GPUs
             "epochs": 500,              # Max epochs
             # Reduced patience (stop faster if not improving)
             "early_stopping_patience": 15,
@@ -285,20 +286,25 @@ USE_CUDA = torch.cuda.is_available()
 CUDA_DEVICE_COUNT = torch.cuda.device_count() if USE_CUDA else 0
 
 # GPU Optimization Settings
-# OPTIMIZED FOR: 30GB RAM with aggressive memory management
+# OPTIMIZED FOR: 2x NVIDIA T4 GPUs (30GB RAM)
+# Goal: Maximize GPU utilization - make them SCREAM
 GPU_CONFIG = {
     "device": DEVICE,
     "use_cuda": USE_CUDA,
-    "num_workers": 0,               # Disabled - workers duplicate data in RAM
-    "pin_memory": False,            # Disabled to save host RAM
-    # Mixed precision - saves 50% GPU memory
+    "num_gpus": CUDA_DEVICE_COUNT,
+    # Data loading - USE WORKERS to keep GPUs fed
+    # 4 workers to prefetch data (CPU → GPU pipeline)
+    "num_workers": 4,
+    "pin_memory": True,             # Pin memory for faster CPU→GPU transfer
+    "prefetch_factor": 2,           # Prefetch 2 batches per worker
+    # Mixed precision - CRITICAL for T4 (Tensor Cores love FP16)
     "mixed_precision": USE_CUDA,
     "cudnn_benchmark": USE_CUDA,    # Enable cuDNN auto-tuner
-    # Gradient accumulation for memory-efficient large batch training
-    "gradient_accumulation_steps": 4,  # Always use - effective batch = batch_size * 4
-    # Memory limits
-    "max_gpu_memory_fraction": 0.85,   # Reserve 15% for system
-    "empty_cache_frequency": 10,       # Clear cache every N batches
+    # NO gradient accumulation - we want BIG batches to saturate GPUs
+    "gradient_accumulation_steps": 1,
+    # Memory limits - T4 has 16GB each, use it!
+    "max_gpu_memory_fraction": 0.95,   # Use 95% of GPU memory
+    "empty_cache_frequency": 50,       # Less frequent cache clearing
 }
 
 # Set cuDNN optimization flags

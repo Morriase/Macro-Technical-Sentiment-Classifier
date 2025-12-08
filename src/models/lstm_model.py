@@ -272,13 +272,25 @@ class LSTMSequenceModel:
         del X_scaled
         gc.collect()
 
+        # DataLoader - OPTIMIZED FOR 2x T4 GPUs
+        # Use workers to keep GPUs fed, pin_memory for fast transfer
+        num_workers = GPU_CONFIG.get('num_workers', 4)
+        pin_memory = GPU_CONFIG.get(
+            'pin_memory', True) and torch.cuda.is_available()
+        prefetch_factor = GPU_CONFIG.get(
+            'prefetch_factor', 2) if num_workers > 0 else None
+
         train_loader = DataLoader(
             train_dataset,
             batch_size=self.batch_size,
             shuffle=False,  # CRITICAL: Never shuffle time series
-            num_workers=0,  # Avoid memory duplication from multiprocessing
-            pin_memory=True if torch.cuda.is_available() else False,
+            num_workers=num_workers,
+            pin_memory=pin_memory,
+            prefetch_factor=prefetch_factor,
+            persistent_workers=num_workers > 0,  # Keep workers alive between epochs
         )
+        logger.info(
+            f"DataLoader: batch_size={self.batch_size}, workers={num_workers}, pin_memory={pin_memory}")
 
         # Validation data
         val_loader = None
@@ -289,9 +301,13 @@ class LSTMSequenceModel:
                 X_val_scaled, y_val, self.sequence_length)
             val_loader = DataLoader(
                 val_dataset,
-                batch_size=self.batch_size,
+                # Larger batch for validation (no gradients)
+                batch_size=self.batch_size * 2,
                 shuffle=False,
-                num_workers=0,
+                num_workers=num_workers,
+                pin_memory=pin_memory,
+                prefetch_factor=prefetch_factor,
+                persistent_workers=num_workers > 0,
             )
             del X_val_scaled
             gc.collect()

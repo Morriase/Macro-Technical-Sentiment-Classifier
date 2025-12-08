@@ -107,7 +107,8 @@ class HybridEnsemble:
             "use_batch_norm": lstm_config.get("use_batch_norm", False),
             # Conservative learning rate (MQL5 standard)
             "learning_rate": lstm_config.get("learning_rate", 3e-5),
-            "batch_size": lstm_config.get("batch_size", 256),
+            # BIG batch for 2x T4 GPUs
+            "batch_size": lstm_config.get("batch_size", 2048),
             "epochs": lstm_config.get("epochs", 500),
             "early_stopping_patience": lstm_config.get("early_stopping_patience", 15),
             # VERY STRONG regularization
