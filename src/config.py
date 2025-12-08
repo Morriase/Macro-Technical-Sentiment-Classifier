@@ -200,8 +200,8 @@ ENSEMBLE_CONFIG = {
     },
     # Memory management settings
     "memory": {
-        "max_train_samples": 500000,     # Limit samples for OOF to prevent OOM
-        "max_val_samples": 100000,       # Limit validation samples
+        "max_train_samples": 5000000,    # Use all data (was 500k)
+        "max_val_samples": 1000000,      # Use all data (was 100k)
         "use_float32": True,            # Use float32 instead of float64
         "aggressive_gc": True,          # Garbage collect after each fold
     },
@@ -215,7 +215,7 @@ WFO_CONFIG = {
     "step_months": 1,               # Smaller steps for more folds
     "min_train_samples": 2000,      # Reduced minimum
     "cv_folds": 3,                  # 3 folds for OOF generation
-    "max_samples_per_fold": 35000,  # Hard limit per fold to prevent OOM
+    "max_samples_per_fold": 1000000,  # Increased to use full folds
 }
 
 # Hyperparameter Optimization
@@ -317,7 +317,7 @@ IMBALANCE_CONFIG = {
 # Target Variable Configuration
 TARGET_CONFIG = {
     # "ternary" (Buy/Sell/Hold) or "binary" (Up/Down)
-    "classification_type": "ternary",
+    "classification_type": "binary",
     # REDUCED from 24h to 8h per expert: shorter horizons more predictable from M5 data
     "forward_window_hours": 8,
     # Fixed 4 pips (was None=ATR-based, caused 68% signals)

@@ -189,8 +189,8 @@ class WalkForwardOptimizer:
 
         # Suggest hyperparameters for XGBoost base learner
         xgb_params = {
-            "objective": "multi:softprob",
-            "num_class": 3,
+            "objective": "binary:logistic",
+            # "num_class": 3,  # REMOVED for Binary Classification
             "learning_rate": trial.suggest_float("learning_rate", 0.02, 0.1, log=True),
             "max_depth": trial.suggest_int("max_depth", 4, 6),
             "n_estimators": 500,  # Will early stop
@@ -358,8 +358,8 @@ class WalkForwardOptimizer:
             logger.info("Training model with optimized parameters")
             # Convert flat params dict to xgb_params structure
             xgb_params = {
-                "objective": "multi:softprob",
-                "num_class": 3,
+                "objective": "binary:logistic",
+                # "num_class": 3,  # REMOVED for Binary Classification
                 "learning_rate": best_params["learning_rate"],
                 "max_depth": best_params["max_depth"],
                 "n_estimators": best_params["n_estimators"],

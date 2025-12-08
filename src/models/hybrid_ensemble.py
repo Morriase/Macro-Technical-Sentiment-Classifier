@@ -65,8 +65,8 @@ class HybridEnsemble:
         xgb_config = ENSEMBLE_CONFIG.get(
             "base_learners", {}).get("xgboost", {})
         self.xgb_params = xgb_params or {
-            "objective": "multi:softprob",
-            "num_class": 2,  # BINARY: Buy/Sell
+            "objective": "binary:logistic",
+            # "num_class": 2,  # REMOVED for Binary Classification
             "max_depth": xgb_config.get("max_depth", 4),
             "learning_rate": xgb_config.get("learning_rate", 0.02),
             "n_estimators": xgb_config.get("n_estimators", 500),
@@ -342,7 +342,7 @@ class HybridEnsemble:
         X_scaled = self.scaler.fit_transform(X)
 
         # Memory check - skip OOF for large datasets
-        max_samples_for_oof = 500000
+        max_samples_for_oof = 5000000  # Increased to use OOF for all datasets
         if len(X) > max_samples_for_oof:
             logger.info(
                 f"Dataset too large ({len(X):,} samples) for OOF - using simple split")
@@ -367,8 +367,8 @@ class HybridEnsemble:
                 f"  Train/Val gap: {gap} samples (prevents LSTM sequence leakage)")
 
             # Subsample using STRATIFIED RANDOM SAMPLING (not tail!) for balanced classes
-            max_train = 50_000  # Reduced for Kaggle RAM
-            max_holdout = 10_000
+            max_train = 2000000  # Increased to use full dataset
+            max_holdout = 500000
 
             # Prepare XGBoost training data (Stratified Sampling OK)
             if len(X_train_full) > max_train:
