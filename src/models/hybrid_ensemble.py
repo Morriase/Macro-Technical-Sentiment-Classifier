@@ -92,43 +92,35 @@ class HybridEnsemble:
         # Base Learner 2: LSTM for sequence modeling
         # TUNED: Senior ML Engineer optimization for 65%+ accuracy
         # Structure: Input → BatchNorm → LSTM(40) → Output(2)
-        # Tuning Focus: Reduce overfitting, improve generalization
+        # MQL5 STANDARD PARAMETERS - Dropout only, no BatchNorm
         lstm_config = ENSEMBLE_CONFIG.get("base_learners", {}).get("lstm", {})
         self.lstm_params = lstm_params or {
-            # OPTIMIZED PARAMETERS for FX convergence (Senior MLOps Engineer recommendations)
+            # Architecture - MQL5 standard
             "sequence_length": lstm_config.get("sequence_length", 40),
-            # Increased capacity
-            "hidden_size": lstm_config.get("hidden_size", 64),
+            # Simpler = less overfitting
+            "hidden_size": lstm_config.get("hidden_size", 40),
             "num_layers": lstm_config.get("num_layers", 1),
             "num_classes": 2,  # BINARY: Buy/Sell
-            # CRITICAL FIX: Enable BOTH BatchNorm AND Dropout for financial data
-            # "Golden Ratio" for FX
-            "dropout": lstm_config.get("dropout", 0.3),
-            "use_batch_norm": lstm_config.get("use_batch_norm", True),
-            # Faster learning with BatchNorm + Dropout
-            "learning_rate": lstm_config.get("learning_rate", 1e-4),
-            # Smaller batches = implicit regularization (flat minima)
-            "batch_size": lstm_config.get("batch_size", 128),
-            # EPOCHS
+            # Regularization - DROPOUT ONLY (no BatchNorm)
+            "dropout": lstm_config.get("dropout", 0.4),  # Strong dropout
+            # DISABLED
+            "use_batch_norm": lstm_config.get("use_batch_norm", False),
+            # Conservative learning rate (MQL5 standard)
+            "learning_rate": lstm_config.get("learning_rate", 3e-5),
+            "batch_size": lstm_config.get("batch_size", 256),
             "epochs": lstm_config.get("epochs", 500),
-            # More patience for convergence
-            "early_stopping_patience": lstm_config.get("early_stopping_patience", 25),
-            # Aggressive regularization (10x stronger L2)
-            "l1_lambda": lstm_config.get("l1_lambda", 1e-7),
-            "l2_lambda": lstm_config.get("l2_lambda", 1e-3),
-            # STANDARD LABEL SMOOTHING
-            "label_smoothing": lstm_config.get("label_smoothing", 0.1),
-            # WARMUP
+            "early_stopping_patience": lstm_config.get("early_stopping_patience", 15),
+            # VERY STRONG regularization
+            "l1_lambda": lstm_config.get("l1_lambda", 1e-6),
+            "l2_lambda": lstm_config.get("l2_lambda", 5e-3),  # Very strong L2
+            "label_smoothing": lstm_config.get("label_smoothing", 0.15),
             "lr_warmup_epochs": lstm_config.get("lr_warmup_epochs", 5),
-            # MIN LR FACTOR
             "lr_min_factor": lstm_config.get("lr_min_factor", 0.01),
-            # GRADIENT CLIPPING
-            "max_grad_norm": lstm_config.get("max_grad_norm", 1.0),
-            # NO GRADIENT ACCUMULATION
+            # Tighter clipping
+            "max_grad_norm": lstm_config.get("max_grad_norm", 0.5),
             "gradient_accumulation_steps": lstm_config.get("gradient_accumulation_steps", 1),
-            # UNIDIRECTIONAL
             "bidirectional": lstm_config.get("bidirectional", False),
-            # NO ACTIVATION (LSTM internal gates provide non-linearity)
+            # NO activation
             "hidden_activation": lstm_config.get("hidden_activation", None),
         }
 

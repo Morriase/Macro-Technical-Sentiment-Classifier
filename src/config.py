@@ -145,51 +145,42 @@ ENSEMBLE_CONFIG = {
             "num_class": 2,             # Changed from 3 to 2 (Buy/Sell)
         },
         "lstm": {
-            # Architecture - BALANCED for convergence and generalization
-            "sequence_length": 40,      # Keep: 40 bars (1 week of H4 data)
-            "hidden_size": 64,          # INCREASED from 40 to capture complex patterns
-            # Keep: 1 LSTM layer (simpler = better generalization)
-            "num_layers": 1,
+            # Architecture - MQL5 STANDARD (per LSTM_NUANCES.md)
+            "sequence_length": 40,      # MQL5: 40 bars (BarsToLine)
+            # MQL5: 40 units (HiddenLayer) - simpler = less overfitting
+            "hidden_size": 40,
+            "num_layers": 1,            # MQL5: 1 LSTM layer only
             "bidirectional": False,     # Unidirectional
-            # No activation (LSTM internal gates provide non-linearity)
-            "hidden_activation": None,
+            "hidden_activation": None,  # NO activation - LSTM gates provide non-linearity
 
-            # CRITICAL FIX: Enable BOTH BatchNorm AND Dropout for financial data
-            # In finance (stochastic, non-stationary), you need:
-            # - BatchNorm: Stabilizes gradients and internal covariate shift
-            # - Dropout: Prevents memorization of noisy candle patterns
-            # This differs from computer vision where BN replaces Dropout
-            "use_batch_norm": True,     # ENABLED - stabilizes training
-            # ENABLED - "Golden Ratio" for FX (prevents overfitting)
-            "dropout": 0.3,
+            # Regularization - DROPOUT ONLY (no BatchNorm)
+            # User preference: BatchNorm + Dropout together causes issues
+            # LSTM gates already have sigmoid/tanh - adding BN disrupts this
+            "use_batch_norm": False,    # DISABLED - use dropout only
+            "dropout": 0.4,             # INCREASED to 0.4 for stronger regularization
 
-            # Regularization - AGGRESSIVE to prevent memorization
-            "l1_lambda": 1e-7,          # Keep: Elastic Net L1
-            # INCREASED from 1e-5 (10x stronger weight decay)
-            "l2_lambda": 1e-3,
+            # Weight regularization - VERY STRONG to prevent overfitting
+            "l1_lambda": 1e-6,          # Slightly stronger L1
+            "l2_lambda": 5e-3,          # VERY STRONG L2 (was 1e-3)
 
-            "label_smoothing": 0.1,     # Standard: 0.1
+            "label_smoothing": 0.15,    # INCREASED to 0.15 for softer targets
 
-            # Learning rate - OPTIMIZED for BatchNorm + Dropout
-            # With BatchNorm and Swish, can train faster than 3e-5
-            # INCREASED from 3e-5 (faster convergence)
-            "learning_rate": 1e-4,
-            "lr_warmup_epochs": 5,      # Keep: 5 epochs warmup
+            # Learning rate - CONSERVATIVE per MQL5
+            "learning_rate": 3e-5,      # MQL5 standard: 3e-5 (slow but stable)
+            "lr_warmup_epochs": 5,      # Warmup epochs
             "lr_min_factor": 0.01,      # Min LR = 1% of initial
 
-            # Training schedule - OPTIMIZED for convergence
-            # Smaller batches introduce noise that helps find flat minima
-            # REDUCED from 1000 (implicit regularization)
-            "batch_size": 128,
-            "epochs": 500,              # Keep: 500 epochs max
-            # INCREASED from 5 (allow more time to converge)
-            "early_stopping_patience": 25,
+            # Training schedule
+            "batch_size": 256,          # Moderate batch size
+            "epochs": 500,              # Max epochs
+            # Reduced patience (stop faster if not improving)
+            "early_stopping_patience": 15,
 
-            # Optimizer - ADAMW with strong weight decay
-            "optimizer": "adamw",       # AdamW (decoupled weight decay)
-            "beta1": 0.9,               # Standard
-            "beta2": 0.999,             # Standard
-            "max_grad_norm": 1.0,       # Standard gradient clipping
+            # Optimizer
+            "optimizer": "adamw",
+            "beta1": 0.9,
+            "beta2": 0.999,
+            "max_grad_norm": 0.5,       # TIGHTER gradient clipping
 
             # Classification
             "num_classes": 2,
@@ -208,12 +199,10 @@ ENSEMBLE_CONFIG = {
         "random_state": 42,
         "early_stopping_rounds": 30,
     },
-    # Memory management settings - CRITICAL for Kaggle 16GB RAM limit
-    # RAM Math: 2M rows × 40 seq × 33 features × 4 bytes = 10.5 GB (too much!)
-    # Solution: Cap samples + True Lazy Loading (no 3D array creation)
+    # Memory management settings - 30GB RAM limit
     "memory": {
-        "max_train_samples": 500000,    # REDUCED: 500k is enough for convergence
-        "max_val_samples": 100000,      # REDUCED: 100k for validation
+        "max_train_samples": 1500000,   # Can use more with 30GB RAM
+        "max_val_samples": 300000,      # More validation samples
         "use_float32": True,            # Use float32 (50% RAM savings)
         "aggressive_gc": True,          # Garbage collect after each fold
     },
