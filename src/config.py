@@ -146,14 +146,15 @@ ENSEMBLE_CONFIG = {
             # Architecture - matches MQL5_LSTM.mq5 exactly (adapted for 3-class)
             # Input: 40 bars × 4 features = 160 input neurons
             # Structure: Input → BatchNorm → LSTM(40) → Output(3=Buy/Sell/Hold)
+            # NO ACTIVATION after LSTM (LSTM gates provide internal non-linearity via sigmoid/tanh)
             "sequence_length": 40,      # BarsToLine (40 historical bars)
             # HiddenLayer (1 LSTM layer with 40 units)
             "hidden_size": 40,
             # ONE LSTM layer only (MQL5: HiddenLayers=0 means 1 LSTM)
             "num_layers": 1,
             "bidirectional": False,     # Unidirectional (MQL5 architecture)
-            # Activation - MQL5 uses AF_NONE for LSTM, Swish for output
-            "hidden_activation": "swish",  # Output layer activation
+            # Activation - unused (LSTM has internal non-linearity via gates)
+            "hidden_activation": "swish",  # Parameter kept for backward compatibility
             "use_batch_norm": True,     # MQL5 has BatchNorm after input layer
             # Regularization - MQL5 uses BatchNorm (no dropout with BatchNorm)
             # ZERO - BatchNorm replaces dropout (MQL5 dropout commented out)
@@ -161,9 +162,11 @@ ENSEMBLE_CONFIG = {
             "l1_lambda": 1e-7,          # Author's exact value
             "l2_lambda": 1e-5,          # Author's exact value
             "label_smoothing": 0.1,     # Keep for classification
-            # Learning rate - MQL5: 3e-5 (NOT 3e-4)
-            "learning_rate": 3e-5,      # MQL5 exact: LearningRate = 3e-5
-            "lr_warmup_epochs": 3,      # Warmup prevents early instability
+            # Learning rate - increased for learning without activation
+            # Removed activation after LSTM → needs stronger initial gradients
+            # Increased from 3e-5 (no activation = no saturation)
+            "learning_rate": 1e-4,
+            "lr_warmup_epochs": 1,          # Reduced to 1 - quick ramp to full LR
             "lr_min_factor": 0.01,      # Min LR = 1% of initial
             # Training schedule - MQL5: BatchSize=10000, Epochs=500
             "batch_size": 10000,        # MQL5 exact: BatchSize = 10000

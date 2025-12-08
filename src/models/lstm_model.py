@@ -53,7 +53,7 @@ class LSTMSequenceClassifier(nn.Module):
             dropout: Dropout rate for regularization
             bidirectional: Whether to use bidirectional LSTM
             use_batch_norm: Whether to use BatchNormalization (stabilizes training)
-            hidden_activation: Activation function for hidden layers ('swish', 'relu', 'tanh')
+            hidden_activation: Unused (LSTM has internal non-linearity via gates)
         """
         super(LSTMSequenceClassifier, self).__init__()
 
@@ -87,15 +87,9 @@ class LSTMSequenceClassifier(nn.Module):
         # Dropout for regularization
         self.dropout = nn.Dropout(dropout)
 
-        # Hidden activation function - Swish accelerates training (author's finding)
-        if hidden_activation == "swish":
-            self.activation = nn.SiLU()  # SiLU is PyTorch's Swish implementation
-        elif hidden_activation == "relu":
-            self.activation = nn.ReLU()
-        elif hidden_activation == "tanh":
-            self.activation = nn.Tanh()
-        else:
-            self.activation = nn.SiLU()  # Default to Swish
+        # Note: No activation after LSTM output
+        # LSTM gates provide internal non-linearity (sigmoid/tanh gates + cell state)
+        # Additional activation function would be redundant and harmful to learning
 
         # Fully connected output layer
         self.fc = nn.Linear(fc_input_size, num_classes)
@@ -105,7 +99,8 @@ class LSTMSequenceClassifier(nn.Module):
 
     def forward(self, x, return_hidden=False):
         """
-        Forward pass with BatchNorm and Swish activation
+        Forward pass: Input → BatchNorm → LSTM → Dropout → FC → Logits
+        No activation after LSTM (LSTM has internal non-linearity via gates)
 
         Args:
             x: Input tensor of shape (batch_size, sequence_length, input_size)
@@ -138,9 +133,7 @@ class LSTMSequenceClassifier(nn.Module):
         if self.use_batch_norm:
             hidden = self.lstm_bn(hidden)
 
-        # Apply Swish activation (accelerates training per author)
-        hidden = self.activation(hidden)
-
+        # No activation after LSTM - LSTM gates already provide non-linearity
         # Apply dropout
         hidden = self.dropout(hidden)
 
@@ -438,12 +431,13 @@ class LSTMSequenceModel:
         )
 
         # Learning rate scheduler with warmup to prevent early instability
-        # Phase 1: Linear warmup for lr_warmup_epochs
+        # Phase 1: Linear warmup for lr_warmup_epochs (1 epoch to warm up quickly)
         # Phase 2: Cosine annealing decay
         def lr_lambda(epoch):
             if epoch < self.lr_warmup_epochs:
-                # Linear warmup from 10% to 100% of learning rate
-                return 0.1 + 0.9 * (epoch / self.lr_warmup_epochs)
+                # Linear warmup from 50% to 100% of learning rate (faster ramp-up)
+                # Without activation, model needs stronger initial gradients
+                return 0.5 + 0.5 * (epoch / self.lr_warmup_epochs)
             else:
                 # Cosine annealing after warmup
                 progress = (epoch - self.lr_warmup_epochs) / \
