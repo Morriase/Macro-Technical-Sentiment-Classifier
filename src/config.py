@@ -154,7 +154,7 @@ ENSEMBLE_CONFIG = {
 
             # Regularization - BatchNorm only
             "use_batch_norm": False,     # ENABLED - stabilizes training
-            "dropout": 0.0,             # DISABLED - use BatchNorm only
+            "dropout": 0.2,             # DISABLED - use BatchNorm only
 
             # Weight regularization - BALANCED
             "l1_lambda": 1e-6,          # Light L1
