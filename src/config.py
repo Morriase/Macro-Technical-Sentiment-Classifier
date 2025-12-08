@@ -122,24 +122,24 @@ ENSEMBLE_CONFIG = {
     "base_learners": {
         "xgboost": {
             # Tree parameters - conservative for generalization
-            "n_estimators": 500,        # More trees but with early stopping
-            "max_depth": 4,             # Reduced from 6 - prevents overfitting
-            "learning_rate": 0.02,      # Slower learning for stability
-            "min_child_weight": 5,      # Increased - requires more samples per leaf
-            "gamma": 0.2,               # Higher - more conservative splits
+            "n_estimators": 1000,       # Increased for better convergence
+            "max_depth": 6,             # Increased from 4 to capture more complexity
+            "learning_rate": 0.05,      # Increased from 0.02 for faster learning
+            "min_child_weight": 3,      # Reduced to allow more specific splits
+            "gamma": 0.1,               # Reduced - less conservative
             # Sampling - aggressive subsampling to reduce variance
-            "subsample": 0.7,           # Row sampling per tree
-            "colsample_bytree": 0.7,    # Column sampling per tree
-            "colsample_bylevel": 0.7,   # Column sampling per level
+            "subsample": 0.8,           # Increased slightly
+            "colsample_bytree": 0.8,    # Increased slightly
+            "colsample_bylevel": 0.8,   # Increased slightly
             # Regularization - strong L1/L2 to prevent overfitting
-            "reg_alpha": 0.3,           # L1 regularization (sparsity)
-            "reg_lambda": 2.0,          # L2 regularization (weight decay)
+            "reg_alpha": 0.1,           # Reduced L1
+            "reg_lambda": 1.0,          # Reduced L2
             # Training settings
             "random_state": 42,
             "early_stopping_rounds": 50,  # Stop if no improvement
             "eval_metric": "mlogloss",
             # Memory optimization
-            "max_bin": 128,             # Reduce histogram bins (default 256)
+            "max_bin": 256,             # Standard bins for better accuracy
             "tree_method": "hist",      # Histogram-based for memory efficiency
             # BINARY CLASSIFICATION UPDATE
             "num_class": 2,             # Changed from 3 to 2 (Buy/Sell)
@@ -149,33 +149,34 @@ ENSEMBLE_CONFIG = {
             # Input: 40 bars × 4 features = 160 input neurons
             # Structure: Input → BatchNorm → LSTM(40) → Output(3=Buy/Sell/Hold)
             # NO ACTIVATION after LSTM (LSTM gates provide internal non-linearity via sigmoid/tanh)
-            "sequence_length": 40,      # BarsToLine (40 historical bars)
+            "sequence_length": 60,      # Increased lookback (was 40)
             # HiddenLayer (1 LSTM layer with 40 units)
-            "hidden_size": 40,
+            "hidden_size": 128,         # Increased capacity (was 40)
             # ONE LSTM layer only (MQL5: HiddenLayers=0 means 1 LSTM)
-            "num_layers": 1,
+            "num_layers": 2,            # Increased depth (was 1)
             "bidirectional": False,     # Unidirectional (MQL5 architecture)
             # Activation - unused (LSTM has internal non-linearity via gates)
             "hidden_activation": "swish",  # Parameter kept for backward compatibility
-            "use_batch_norm": False,     # MQL5 has BatchNorm after input layer
+            "use_batch_norm": True,      # Enabled for faster convergence
             # Regularization - MQL5 uses BatchNorm (no dropout with BatchNorm)
             # ZERO - BatchNorm replaces dropout (MQL5 dropout commented out)
-            "dropout": 0.3,
-            "l1_lambda": 1e-5,          # Author's exact value
-            "l2_lambda": 1e-4,          # Author's exact value
-            "label_smoothing": 0.1,     # Keep for classification
+            "dropout": 0.2,             # Reduced dropout (was 0.3)
+            "l1_lambda": 1e-6,          # Reduced regularization
+            "l2_lambda": 1e-5,          # Reduced regularization
+            "label_smoothing": 0.05,    # Reduced smoothing
             # Learning rate - increased for learning without activation
             # NO activation after LSTM → needs stronger initial gradients
             # Reduced from 5e-4 to 1e-4 to prevent overfitting/divergence
-            "learning_rate": 1e-4,
-            "lr_warmup_epochs": 1,          # Reduced to 1 - quick ramp to full LR
-            "lr_min_factor": 0.01,      # Min LR = 1% of initial
+            # Increased for faster learning (was 1e-4)
+            "learning_rate": 1e-3,
+            "lr_warmup_epochs": 3,      # Increased warmup
+            "lr_min_factor": 0.1,       # Min LR = 10% of initial
             # Training schedule - MQL5: BatchSize=10000, Epochs=500
-            "batch_size": 10000,        # MQL5 exact: BatchSize = 10000
-            "epochs": 500,              # MQL5 exact: Epochs = 500
-            "early_stopping_patience": 20,  # MQL5: CEarlyStopping(20, 0.001)
+            "batch_size": 2048,         # Reduced from 10000 for more updates
+            "epochs": 200,              # Reduced epochs (faster convergence)
+            "early_stopping_patience": 15,  # MQL5: CEarlyStopping(20, 0.001)
             # Optimizer - keep AdamW (better than Adam for weight decay)
-            "optimizer": "adam",
+            "optimizer": "adamw",       # Explicitly use AdamW
             "beta1": 0.9,               # Author's value
             "beta2": 0.999,             # Author's value
             # Gradient clipping - prevents exploding gradients
