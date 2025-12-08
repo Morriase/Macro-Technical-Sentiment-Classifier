@@ -153,7 +153,7 @@ ENSEMBLE_CONFIG = {
             "hidden_activation": None,  # NO activation - LSTM gates provide non-linearity
 
             # Regularization - BatchNorm only
-            "use_batch_norm": True,     # ENABLED - stabilizes training
+            "use_batch_norm": False,     # ENABLED - stabilizes training
             "dropout": 0.0,             # DISABLED - use BatchNorm only
 
             # Weight regularization - BALANCED
