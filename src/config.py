@@ -158,11 +158,14 @@ ENSEMBLE_CONFIG = {
             # Activation - unused (LSTM has internal non-linearity via gates)
             "hidden_activation": "swish",  # Parameter kept for backward compatibility
             "use_batch_norm": True,      # Enabled for faster convergence
-            # Regularization - MQL5 uses BatchNorm (no dropout with BatchNorm)
-            # ZERO - BatchNorm replaces dropout (MQL5 dropout commented out)
-            "dropout": 0.3,             # Increased to 0.3 to prevent spikes
-            "l1_lambda": 1e-5,          # Increased regularization
-            "l2_lambda": 1e-4,          # Increased regularization
+
+            # Elastic Net Regularization (L1 + L2)
+            # Combines L1 (Lasso) for feature selection and L2 (Ridge) for weight stability.
+            # Helps combat overfitting and stabilizes training (prevents spikes).
+            "l1_lambda": 1e-7,          # L1: Forces irrelevant weights to zero (Sparsity) - Author's value
+            "l2_lambda": 1e-5,          # L2: Penalizes large weights (Stability) - Author's value
+            
+            "dropout": 0.3,             # Dropout rate (0.3 to prevent spikes)
             "label_smoothing": 0.05,    # Reduced smoothing
             # Learning rate - increased for learning without activation
             # NO activation after LSTM → needs stronger initial gradients
