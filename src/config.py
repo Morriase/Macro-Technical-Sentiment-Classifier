@@ -145,42 +145,40 @@ ENSEMBLE_CONFIG = {
             "num_class": 2,             # Changed from 3 to 2 (Buy/Sell)
         },
         "lstm": {
-            # Architecture - matches MQL5_LSTM.mq5 exactly per LSTM_NUANCES.md
-            # Input: 40 bars × N features per bar
-            # Structure: Input → BatchNorm → LSTM(40) → Output(2=Buy/Sell)
-            # NO ACTIVATION after LSTM (LSTM gates provide internal non-linearity via sigmoid/tanh)
-            "sequence_length": 40,      # MQL5 standard: 40 bars (BarsToLine)
-            # HiddenLayer - MQL5: 40 neurons
-            "hidden_size": 40,          # MQL5 standard: 40 units
-            # ONE LSTM layer only (MQL5: HiddenLayers=0 means 1 LSTM)
-            "num_layers": 1,            # MQL5 standard: 1 layer
-            "bidirectional": False,     # Unidirectional (MQL5 architecture)
-            # Activation - unused (LSTM has internal non-linearity via gates)
-            "hidden_activation": None,  # No activation per LSTM_NUANCES.md
+            # Architecture - balanced for 51 features
+            # Increased capacity from MQL5 defaults to handle more features
+            "sequence_length": 40,      # MQL5 standard: 40 bars
+            "hidden_size": 64,          # Increased from 40 for 51 features
+            "num_layers": 1,            # Keep simple - 1 layer
+            "bidirectional": False,     # Unidirectional
+            "hidden_activation": None,  # No activation (LSTM internal)
             "use_batch_norm": True,     # Enabled - stabilizes training
 
-            # Elastic Net Regularization (L1 + L2) per LSTM_NUANCES.md
-            # L1: Forces irrelevant weights to zero (Sparsity)
-            "l1_lambda": 1e-7,          # Author's exact value
-            # L2: Penalizes large weights (Stability)
-            "l2_lambda": 1e-5,          # Author's exact value
+            # Regularization - increased to combat overfitting
+            "l1_lambda": 1e-6,          # Increased from 1e-7
+            "l2_lambda": 1e-4,          # Increased from 1e-5
 
-            "dropout": 0.0,             # Disabled - BatchNorm replaces dropout
-            "label_smoothing": 0.0,     # Disabled for cleaner gradients
-            # Learning rate - CRITICAL: Must be very low per LSTM_NUANCES.md
-            "learning_rate": 3e-5,      # Author's exact value (NOT 1e-4!)
+            "dropout": 0.0,             # Disabled - using BatchNorm
+            "label_smoothing": 0.1,     # Re-enabled to prevent overconfidence
+            
+            # Learning rate - INCREASED for faster learning
+            # 3e-5 was too slow - model wasn't learning
+            "learning_rate": 1e-4,      # Increased from 3e-5
             "lr_warmup_epochs": 3,      # Brief warmup
             "lr_min_factor": 0.01,      # Min LR = 1% of initial
-            # Training schedule - MQL5 exact values
-            "batch_size": 10000,        # MQL5 standard: 10000
-            "epochs": 500,              # MQL5 standard: 500
-            "early_stopping_patience": 5,   # Author's value
-            # Optimizer - Adam per LSTM_NUANCES.md (not AdamW)
-            "optimizer": "adam",        # Author uses Adam, not AdamW
-            "beta1": 0.9,               # Author's value
-            "beta2": 0.999,             # Author's value
+            
+            # Training schedule - optimized for convergence
+            "batch_size": 2048,         # Reduced from 10000 for more updates per epoch
+            "epochs": 200,              # Reduced from 500 (early stopping will handle)
+            "early_stopping_patience": 15,  # Increased from 5 to allow learning
+            
+            # Optimizer
+            "optimizer": "adamw",       # AdamW for better regularization
+            "beta1": 0.9,
+            "beta2": 0.999,
             "max_grad_norm": 1.0,       # Standard clipping
-            # BINARY CLASSIFICATION
+            
+            # Classification
             "num_classes": 2,           # Buy/Sell
             "gradient_accumulation_steps": 1,
         },
