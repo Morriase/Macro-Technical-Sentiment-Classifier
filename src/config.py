@@ -145,41 +145,42 @@ ENSEMBLE_CONFIG = {
             "num_class": 2,             # Changed from 3 to 2 (Buy/Sell)
         },
         "lstm": {
-            # Architecture - balanced for 51 features
-            # Increased capacity from MQL5 defaults to handle more features
-            "sequence_length": 40,      # MQL5 standard: 40 bars
-            "hidden_size": 64,          # Increased from 40 for 51 features
-            "num_layers": 1,            # Keep simple - 1 layer
+            # Architecture - SIMPLIFIED to reduce overfitting
+            "sequence_length": 40,      # 40 bars lookback
+            "hidden_size": 32,          # REDUCED from 64 - less capacity = less memorization
+            "num_layers": 1,            # Keep simple
             "bidirectional": False,     # Unidirectional
             "hidden_activation": None,  # No activation (LSTM internal)
-            "use_batch_norm": True,     # Enabled - stabilizes training
-
-            # Regularization - increased to combat overfitting
-            "l1_lambda": 1e-6,          # Increased from 1e-7
-            "l2_lambda": 1e-4,          # Increased from 1e-5
-
-            "dropout": 0.0,             # Disabled - using BatchNorm
-            "label_smoothing": 0.1,     # Re-enabled to prevent overconfidence
             
-            # Learning rate - INCREASED for faster learning
-            # 3e-5 was too slow - model wasn't learning
-            "learning_rate": 1e-4,      # Increased from 3e-5
-            "lr_warmup_epochs": 3,      # Brief warmup
+            # CRITICAL: Use Dropout instead of BatchNorm for regularization
+            # BatchNorm alone wasn't preventing overfitting
+            "use_batch_norm": False,    # DISABLED - using dropout instead
+            "dropout": 0.4,             # ENABLED - strong dropout to force generalization
+
+            # Regularization - AGGRESSIVE to combat severe overfitting
+            "l1_lambda": 1e-5,          # Increased 10x
+            "l2_lambda": 1e-3,          # Increased 10x - strong weight penalty
+
+            "label_smoothing": 0.15,    # Increased - softer targets
+            
+            # Learning rate - REDUCED to slow down memorization
+            "learning_rate": 5e-5,      # Reduced from 1e-4
+            "lr_warmup_epochs": 5,      # Longer warmup
             "lr_min_factor": 0.01,      # Min LR = 1% of initial
             
-            # Training schedule - optimized for convergence
-            "batch_size": 2048,         # Reduced from 10000 for more updates per epoch
-            "epochs": 200,              # Reduced from 500 (early stopping will handle)
-            "early_stopping_patience": 15,  # Increased from 5 to allow learning
+            # Training schedule
+            "batch_size": 2048,         # Keep same
+            "epochs": 200,              # Max epochs
+            "early_stopping_patience": 25,  # More patience for slower learning
             
             # Optimizer
-            "optimizer": "adamw",       # AdamW for better regularization
+            "optimizer": "adamw",       # AdamW with strong weight decay
             "beta1": 0.9,
             "beta2": 0.999,
-            "max_grad_norm": 1.0,       # Standard clipping
+            "max_grad_norm": 0.5,       # Tighter gradient clipping
             
             # Classification
-            "num_classes": 2,           # Buy/Sell
+            "num_classes": 2,
             "gradient_accumulation_steps": 1,
         },
     },
