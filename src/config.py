@@ -145,40 +145,38 @@ ENSEMBLE_CONFIG = {
             "num_class": 2,             # Changed from 3 to 2 (Buy/Sell)
         },
         "lstm": {
-            # Architecture - BIGGER to saturate 2x T4 GPUs (32GB VRAM total)
-            # But with HEAVY regularization to prevent overfitting
-            "sequence_length": 64,      # INCREASED from 40 - more context, more VRAM
-            "hidden_size": 128,         # INCREASED from 32 - bigger model, more VRAM
-            "num_layers": 2,            # INCREASED from 1 - deeper model, more VRAM
+            # Architecture - BALANCED: Big enough for GPUs, small enough to learn
+            "sequence_length": 40,      # Back to 40 - sweet spot
+            "hidden_size": 64,          # Moderate size
+            "num_layers": 1,            # Single layer - simpler = better generalization
             "bidirectional": False,
             "hidden_activation": None,  # NO activation - LSTM gates provide non-linearity
 
-            # Regularization - DROPOUT ONLY (no BatchNorm)
-            # HEAVY regularization to compensate for bigger model
+            # Regularization - MODERATE (not too heavy to prevent learning)
             "use_batch_norm": False,    # DISABLED per user preference
-            "dropout": 0.6,             # VERY HIGH dropout for big model
+            "dropout": 0.3,             # Moderate dropout - allow learning
 
-            # Weight regularization - EXTREME to prevent overfitting
-            "l1_lambda": 1e-4,          # Strong L1 (sparsity)
-            "l2_lambda": 5e-2,          # VERY STRONG L2 (weight decay)
+            # Weight regularization - BALANCED
+            "l1_lambda": 1e-6,          # Light L1
+            "l2_lambda": 1e-3,          # Moderate L2
 
-            "label_smoothing": 0.2,     # Soft targets
+            "label_smoothing": 0.1,     # Standard smoothing
 
-            # Learning rate - LOW for stability with big model
-            "learning_rate": 5e-5,      # Moderate LR
+            # Learning rate - MODERATE for stable learning
+            "learning_rate": 1e-4,      # Standard rate
             "lr_warmup_epochs": 5,      # Warmup
-            "lr_min_factor": 0.1,       # Higher min LR
+            "lr_min_factor": 0.01,      # Standard min
 
-            # Training schedule - BIG BATCHES to saturate GPUs
-            "batch_size": 8192,         # HUGE batch - fill those T4s!
+            # Training schedule - LARGE BATCHES for GPU saturation
+            "batch_size": 4096,         # Large batch (not extreme)
             "epochs": 500,
-            "early_stopping_patience": 15,
+            "early_stopping_patience": 20,
 
             # Optimizer
             "optimizer": "adamw",
             "beta1": 0.9,
             "beta2": 0.999,
-            "max_grad_norm": 0.5,       # Gradient clipping
+            "max_grad_norm": 1.0,       # Standard clipping
 
             # Classification
             "num_classes": 2,

@@ -92,29 +92,29 @@ class HybridEnsemble:
         # Base Learner 2: LSTM for sequence modeling
         # TUNED: Senior ML Engineer optimization for 65%+ accuracy
         # Structure: Input → BatchNorm → LSTM(40) → Output(2)
-        # BIG MODEL + HEAVY REGULARIZATION - Saturate 2x T4 GPUs
+        # BALANCED: GPU saturation + Learning capability
         lstm_config = ENSEMBLE_CONFIG.get("base_learners", {}).get("lstm", {})
         self.lstm_params = lstm_params or {
-            # Architecture - BIG to saturate GPUs
-            "sequence_length": lstm_config.get("sequence_length", 64),
-            "hidden_size": lstm_config.get("hidden_size", 128),
-            "num_layers": lstm_config.get("num_layers", 2),
+            # Architecture - Moderate
+            "sequence_length": lstm_config.get("sequence_length", 40),
+            "hidden_size": lstm_config.get("hidden_size", 64),
+            "num_layers": lstm_config.get("num_layers", 1),
             "num_classes": 2,
-            # Regularization - HEAVY dropout to compensate for big model
-            "dropout": lstm_config.get("dropout", 0.6),
+            # Regularization - Moderate dropout
+            "dropout": lstm_config.get("dropout", 0.3),
             "use_batch_norm": lstm_config.get("use_batch_norm", False),
             # Learning rate
-            "learning_rate": lstm_config.get("learning_rate", 5e-5),
-            "batch_size": lstm_config.get("batch_size", 8192),  # HUGE batch
+            "learning_rate": lstm_config.get("learning_rate", 1e-4),
+            "batch_size": lstm_config.get("batch_size", 4096),
             "epochs": lstm_config.get("epochs", 500),
-            "early_stopping_patience": lstm_config.get("early_stopping_patience", 15),
-            # EXTREME regularization for big model
-            "l1_lambda": lstm_config.get("l1_lambda", 1e-4),
-            "l2_lambda": lstm_config.get("l2_lambda", 5e-2),
-            "label_smoothing": lstm_config.get("label_smoothing", 0.2),
+            "early_stopping_patience": lstm_config.get("early_stopping_patience", 20),
+            # Balanced regularization
+            "l1_lambda": lstm_config.get("l1_lambda", 1e-6),
+            "l2_lambda": lstm_config.get("l2_lambda", 1e-3),
+            "label_smoothing": lstm_config.get("label_smoothing", 0.1),
             "lr_warmup_epochs": lstm_config.get("lr_warmup_epochs", 5),
-            "lr_min_factor": lstm_config.get("lr_min_factor", 0.1),
-            "max_grad_norm": lstm_config.get("max_grad_norm", 0.5),
+            "lr_min_factor": lstm_config.get("lr_min_factor", 0.01),
+            "max_grad_norm": lstm_config.get("max_grad_norm", 1.0),
             "gradient_accumulation_steps": lstm_config.get("gradient_accumulation_steps", 1),
             "bidirectional": lstm_config.get("bidirectional", False),
             "hidden_activation": lstm_config.get("hidden_activation", None),
