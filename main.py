@@ -232,8 +232,30 @@ class ForexClassifierPipeline:
             logger.warning(
                 "No higher timeframe data available. Skipping MTF feature engineering.")
 
-        # --- Step 2.3: FRED Macro Features (REAL historical data) ---
-        # Replace synthetic macro events with actual FRED economic indicators
+        # --- Step 2.3: Macro Features (Hybrid: Calendar Events + FRED) ---
+
+        # 1. Calculate Temporal Proximity Features (from Calendar Events)
+        # These capture high-frequency volatility shocks (NFP, CPI releases)
+        if self.df_events is not None and not self.df_events.empty and self.macro_data:
+            logger.info(
+                "Calculating temporal proximity features from macro events...")
+            # Ensure 'date' column is treated as timestamp for proximity calculation
+            if 'date' in self.df_events.columns and 'timestamp' not in self.df_events.columns:
+                self.df_events['timestamp'] = self.df_events['date']
+
+            self.df_features = self.macro_data.calculate_temporal_proximity(
+                events_df=self.df_events,
+                price_df=self.df_features,
+            )
+        else:
+            logger.warning(
+                "No macro events available - skipping proximity features")
+            self.df_features["tau_pre"] = 0.0
+            self.df_features["tau_post"] = 0.0
+            self.df_features["weighted_surprise"] = 0.0
+
+        # 2. Fetch FRED Macro Features (REAL historical data)
+        # These capture low-frequency macro regime (Interest Rates, GDP, Inflation)
         if HAS_FRED and FREDMacroLoader is not None:
             logger.info(
                 f"Fetching FRED macro features for {self.currency_pair}...")
@@ -314,18 +336,10 @@ class ForexClassifierPipeline:
                 self.df_features["rate_differential"] = 0.0
                 self.df_features["vix"] = 20.0
                 self.df_features["yield_curve"] = 0.0
-        elif self.df_events is not None and not self.df_events.empty and self.macro_data:
-            # Fallback to old TradingView calendar events if FRED not available
-            logger.info(
-                "FRED not available, using TradingView calendar events...")
-            self.df_features = self.macro_data.calculate_temporal_proximity(
-                events_df=self.df_events,
-                price_df=self.df_features,
-            )
         else:
             # Add placeholder columns if no macro data
             logger.warning(
-                "No macro data sources available - using placeholders")
+                "No FRED macro source available - using placeholders")
             self.df_features["rate_differential"] = 0.0
             self.df_features["vix"] = 20.0
             self.df_features["yield_curve"] = 0.0

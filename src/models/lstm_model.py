@@ -34,11 +34,11 @@ class LSTMSequenceClassifier(nn.Module):
     def __init__(
         self,
         input_size: int,
-        hidden_size: int = 0,
-        num_layers: int = 40,
+        hidden_size: int = 40,
+        num_layers: int = 1,
         num_classes: int = 3,
         dropout: float = 0.0,
-        bidirectional: bool = True,
+        bidirectional: bool = False,
         use_batch_norm: bool = True,
         hidden_activation: str = "swish",
     ):
@@ -47,8 +47,8 @@ class LSTMSequenceClassifier(nn.Module):
 
         Args:
             input_size: Number of input features per timestep
-            hidden_size: Number of hidden units in LSTM
-            num_layers: Number of LSTM layers
+            hidden_size: Number of hidden units in LSTM (default 40 per MQL5)
+            num_layers: Number of LSTM layers (default 1 per MQL5)
             num_classes: Number of output classes (Buy/Sell/Hold)
             dropout: Dropout rate for regularization
             bidirectional: Whether to use bidirectional LSTM
@@ -303,13 +303,20 @@ class LSTMSequenceModel:
         # Make a contiguous copy to avoid non-writable tensor warning
         X_sequences = np.ascontiguousarray(windows.transpose(0, 2, 1))
 
-        # Handle targets
+        # Handle targets - CRITICAL FIX:
+        # If we have n_samples, sliding windows create (n_samples - seq_length + 1) windows
+        # Each window i spans from [i, i+seq_length), and targets the END of the window
+        # So target index for window i is (i + seq_length - 1)
+        # This means y_sequences should be y[seq_length-1:] (length = n_samples - seq_length + 1)
         if y is not None:
-            # We want the target at the end of each sequence
-            # y is (n_samples,)
-            # We want y corresponding to the last step of each window
-            # The windows end at indices: sequence_length-1, sequence_length, ...
-            y_sequences = y[self.sequence_length-1:]
+            # y[seq_length-1:] = y[39:] for seq_length=40
+            # This has length = n_samples - seq_length + 1 = same as X_sequences
+            y_sequences = y[self.sequence_length - 1:]
+
+            # Verify alignment
+            assert len(X_sequences) == len(y_sequences), \
+                f"X_sequences ({len(X_sequences)}) and y_sequences ({len(y_sequences)}) length mismatch!"
+
             return X_sequences, y_sequences
 
         return X_sequences, None

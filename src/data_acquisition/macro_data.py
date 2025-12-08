@@ -211,7 +211,14 @@ class MacroDataAcquisition:
 
         # For each event, calculate proximity for all price bars
         for idx, event in events_df.iterrows():
-            event_time = event["timestamp"]
+            # Handle both 'timestamp' and 'date' column names
+            if "timestamp" in event:
+                event_time = event["timestamp"]
+            elif "date" in event:
+                event_time = event["date"]
+            else:
+                continue  # Skip if no time column found
+
             surprise = event.get("surprise_zscore", 0.0)
 
             # Skip if surprise is NaN

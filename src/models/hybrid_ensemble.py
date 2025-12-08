@@ -394,9 +394,16 @@ class HybridEnsemble:
             # Train base learners on subsampled data
             logger.info("Training XGBoost base learner...")
             from sklearn.utils.class_weight import compute_sample_weight
-            # Strong class weights to match 74/13/13 imbalance (74/13 ≈ 5.7)
+
+            # CRITICAL FIX: Correct class weight calculation
+            # Data distribution: Buy 13.3% (10602), Sell 13.1% (10470), Hold 73.6% (58727)
+            # Weight = 1 / (fraction of that class) × (num_classes / total_samples)
+            # Or simpler: weight = count_of_largest_class / count_of_that_class
+            # Hold weight: 58727 / 58727 = 1.0
+            # Buy weight:  58727 / 10602 ≈ 5.54
+            # Sell weight: 58727 / 10470 ≈ 5.61
             sample_weights = compute_sample_weight(
-                class_weight={0: 5.5, 1: 5.5, 2: 1.0},
+                class_weight={0: 5.54, 1: 5.61, 2: 1.0},
                 y=y_train_base
             )
             self.xgb_base.fit(
