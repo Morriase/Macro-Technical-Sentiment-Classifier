@@ -92,36 +92,31 @@ class HybridEnsemble:
         # Base Learner 2: LSTM for sequence modeling
         # TUNED: Senior ML Engineer optimization for 65%+ accuracy
         # Structure: Input → BatchNorm → LSTM(40) → Output(2)
-        # MQL5 STANDARD PARAMETERS - Dropout only, no BatchNorm
+        # ANTI-OVERFITTING PARAMETERS - Dropout only, no BatchNorm
         lstm_config = ENSEMBLE_CONFIG.get("base_learners", {}).get("lstm", {})
         self.lstm_params = lstm_params or {
-            # Architecture - MQL5 standard
+            # Architecture - MINIMAL
             "sequence_length": lstm_config.get("sequence_length", 40),
-            # Simpler = less overfitting
-            "hidden_size": lstm_config.get("hidden_size", 40),
+            "hidden_size": lstm_config.get("hidden_size", 32),  # Smaller
             "num_layers": lstm_config.get("num_layers", 1),
-            "num_classes": 2,  # BINARY: Buy/Sell
-            # Regularization - DROPOUT ONLY (no BatchNorm)
-            "dropout": lstm_config.get("dropout", 0.4),  # Strong dropout
-            # DISABLED
+            "num_classes": 2,
+            # Regularization - AGGRESSIVE DROPOUT
+            "dropout": lstm_config.get("dropout", 0.5),
             "use_batch_norm": lstm_config.get("use_batch_norm", False),
-            # Conservative learning rate (MQL5 standard)
-            "learning_rate": lstm_config.get("learning_rate", 3e-5),
-            # BIG batch for 2x T4 GPUs
+            # VERY LOW learning rate
+            "learning_rate": lstm_config.get("learning_rate", 1e-5),
             "batch_size": lstm_config.get("batch_size", 2048),
             "epochs": lstm_config.get("epochs", 500),
-            "early_stopping_patience": lstm_config.get("early_stopping_patience", 15),
-            # VERY STRONG regularization
-            "l1_lambda": lstm_config.get("l1_lambda", 1e-6),
-            "l2_lambda": lstm_config.get("l2_lambda", 5e-3),  # Very strong L2
-            "label_smoothing": lstm_config.get("label_smoothing", 0.15),
-            "lr_warmup_epochs": lstm_config.get("lr_warmup_epochs", 5),
-            "lr_min_factor": lstm_config.get("lr_min_factor", 0.01),
-            # Tighter clipping
-            "max_grad_norm": lstm_config.get("max_grad_norm", 0.5),
+            "early_stopping_patience": lstm_config.get("early_stopping_patience", 10),
+            # EXTREME regularization
+            "l1_lambda": lstm_config.get("l1_lambda", 1e-5),
+            "l2_lambda": lstm_config.get("l2_lambda", 1e-2),
+            "label_smoothing": lstm_config.get("label_smoothing", 0.2),
+            "lr_warmup_epochs": lstm_config.get("lr_warmup_epochs", 3),
+            "lr_min_factor": lstm_config.get("lr_min_factor", 0.1),
+            "max_grad_norm": lstm_config.get("max_grad_norm", 0.3),
             "gradient_accumulation_steps": lstm_config.get("gradient_accumulation_steps", 1),
             "bidirectional": lstm_config.get("bidirectional", False),
-            # NO activation
             "hidden_activation": lstm_config.get("hidden_activation", None),
         }
 

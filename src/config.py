@@ -145,43 +145,39 @@ ENSEMBLE_CONFIG = {
             "num_class": 2,             # Changed from 3 to 2 (Buy/Sell)
         },
         "lstm": {
-            # Architecture - MQL5 STANDARD (per LSTM_NUANCES.md)
-            "sequence_length": 40,      # MQL5: 40 bars (BarsToLine)
-            # MQL5: 40 units (HiddenLayer) - simpler = less overfitting
-            "hidden_size": 40,
-            "num_layers": 1,            # MQL5: 1 LSTM layer only
-            "bidirectional": False,     # Unidirectional
+            # Architecture - MINIMAL to prevent overfitting
+            "sequence_length": 40,      # MQL5: 40 bars
+            "hidden_size": 32,          # REDUCED from 40 - smaller = less overfitting
+            "num_layers": 1,            # 1 layer only
+            "bidirectional": False,
             "hidden_activation": None,  # NO activation - LSTM gates provide non-linearity
 
             # Regularization - DROPOUT ONLY (no BatchNorm)
-            # User preference: BatchNorm + Dropout together causes issues
-            # LSTM gates already have sigmoid/tanh - adding BN disrupts this
-            "use_batch_norm": False,    # DISABLED - use dropout only
-            "dropout": 0.4,             # INCREASED to 0.4 for stronger regularization
+            "use_batch_norm": False,    # DISABLED per user preference
+            "dropout": 0.5,             # INCREASED to 0.5 - aggressive dropout
 
-            # Weight regularization - VERY STRONG to prevent overfitting
-            "l1_lambda": 1e-6,          # Slightly stronger L1
-            "l2_lambda": 5e-3,          # VERY STRONG L2 (was 1e-3)
+            # Weight regularization - EXTREME to prevent overfitting
+            # Model overfits by epoch 5, need much stronger regularization
+            "l1_lambda": 1e-5,          # 10x stronger L1
+            "l2_lambda": 1e-2,          # EXTREME L2 (was 5e-3)
 
-            "label_smoothing": 0.15,    # INCREASED to 0.15 for softer targets
+            "label_smoothing": 0.2,     # INCREASED to 0.2 - softer targets
 
-            # Learning rate - CONSERVATIVE per MQL5
-            "learning_rate": 3e-5,      # MQL5 standard: 3e-5 (slow but stable)
-            "lr_warmup_epochs": 5,      # Warmup epochs
-            "lr_min_factor": 0.01,      # Min LR = 1% of initial
+            # Learning rate - VERY LOW to slow down learning
+            "learning_rate": 1e-5,      # REDUCED from 3e-5 - slower learning
+            "lr_warmup_epochs": 3,      # Shorter warmup
+            "lr_min_factor": 0.1,       # Higher min LR
 
-            # Training schedule - OPTIMIZED FOR 2x T4 GPUs
-            # Large batch = saturate GPU, faster training
-            "batch_size": 2048,         # BIG batch to saturate 2x T4 GPUs
-            "epochs": 500,              # Max epochs
-            # Reduced patience (stop faster if not improving)
-            "early_stopping_patience": 15,
+            # Training schedule
+            "batch_size": 2048,         # Keep big for GPU utilization
+            "epochs": 500,
+            "early_stopping_patience": 10,  # REDUCED - stop faster when overfitting
 
             # Optimizer
             "optimizer": "adamw",
             "beta1": 0.9,
             "beta2": 0.999,
-            "max_grad_norm": 0.5,       # TIGHTER gradient clipping
+            "max_grad_norm": 0.3,       # EVEN TIGHTER gradient clipping
 
             # Classification
             "num_classes": 2,
