@@ -34,11 +34,11 @@ class LSTMSequenceClassifier(nn.Module):
     def __init__(
         self,
         input_size: int,
-        hidden_size: int = 64,
-        num_layers: int = 3,
+        hidden_size: int = 0,
+        num_layers: int = 40,
         num_classes: int = 3,
-        dropout: float = 0.3,
-        bidirectional: bool = False,
+        dropout: float = 0.0,
+        bidirectional: bool = True,
         use_batch_norm: bool = True,
         hidden_activation: str = "swish",
     ):
@@ -169,15 +169,15 @@ class LSTMSequenceModel:
     def __init__(
         self,
         input_size: int,
-        sequence_length: int = 16,
-        hidden_size: int = 64,
-        num_layers: int = 3,
+        sequence_length: int = 40,
+        hidden_size: int = 40,
+        num_layers: int = 1,
         num_classes: int = 3,
-        dropout: float = 0.3,
-        learning_rate: float = 3e-4,
-        batch_size: int = 5000,
-        epochs: int = 200,
-        early_stopping_patience: int = 5,
+        dropout: float = 0.0,
+        learning_rate: float = 3e-5,
+        batch_size: int = 10000,
+        epochs: int = 500,
+        early_stopping_patience: int = 20,
         device: Optional[str] = None,
         l1_lambda: float = 1e-7,
         l2_lambda: float = 1e-5,
@@ -194,19 +194,22 @@ class LSTMSequenceModel:
         **kwargs,  # Accept extra params gracefully
     ):
         """
-        Initialize LSTM sequence model (author's optimized parameters)
+        Initialize LSTM sequence model (MQL5_LSTM.mq5 exact parameters)
+
+        Architecture: Input(160) → BatchNorm → LSTM(40) → Output(2)
+        Matches MQL5 training: 1 LSTM layer, BatchNorm, no dropout, 3e-5 LR
 
         Args:
             input_size: Number of features per timestep
-            sequence_length: Look-back window (16 for M5 data)
-            hidden_size: LSTM hidden units (64, author used 40)
-            num_layers: Number of LSTM layers (3 for deep learning)
-            num_classes: Number of output classes
-            dropout: Dropout rate (0.3, author's value)
-            learning_rate: Initial learning rate (3e-4, author's preferred)
-            batch_size: Training batch size (5000, author used 1000-10000)
-            epochs: Maximum training epochs (200, author used 500-1000)
-            early_stopping_patience: Patience for early stopping (5, author's value)
+            sequence_length: Look-back window (40 bars = BarsToLine in MQL5)
+            hidden_size: LSTM hidden units (40, matches HiddenLayer in MQL5)
+            num_layers: Number of LSTM layers (1 = MQL5 default, no hidden layers)
+            num_classes: Number of output classes (3 for Buy/Sell/Hold)
+            dropout: Dropout rate (0.0 - BatchNorm replaces dropout per MQL5)
+            learning_rate: Initial learning rate (3e-5 from MQL5, NOT 3e-4)
+            batch_size: Training batch size (10000 from MQL5)
+            epochs: Maximum training epochs (500 from MQL5)
+            early_stopping_patience: Patience for early stopping (20 from MQL5)
             device: 'cuda', 'cpu', or None (auto-detect)
             l1_lambda: L1 regularization (1e-7, author's value)
             l2_lambda: L2 regularization (1e-5, author's value)

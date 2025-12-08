@@ -90,26 +90,40 @@ class HybridEnsemble:
         self.xgb_base = xgb.XGBClassifier(**self.xgb_params)
 
         # Base Learner 2: LSTM for sequence modeling
-        # OPTIMIZED: Deep network with proper regularization
+        # OPTIMIZED: MQL5_LSTM.mq5 architecture parameters
+        # Structure: Input → BatchNorm → LSTM(40) → Output(3)
+        # MQL5 test file has Output(2), but production uses 3 classes: Buy(2), Sell(0), Hold(1)
         lstm_config = ENSEMBLE_CONFIG.get("base_learners", {}).get("lstm", {})
         self.lstm_params = lstm_params or {
-            "sequence_length": lstm_config.get("sequence_length", 16),
-            "hidden_size": lstm_config.get("hidden_size", 96),
-            "num_layers": lstm_config.get("num_layers", 3),
+            # BarsToLine
+            "sequence_length": lstm_config.get("sequence_length", 40),
+            # HiddenLayer
+            "hidden_size": lstm_config.get("hidden_size", 40),
+            # 1 LSTM layer
+            "num_layers": lstm_config.get("num_layers", 1),
             "num_classes": 3,
-            "dropout": lstm_config.get("dropout", 0.4),
-            "learning_rate": lstm_config.get("learning_rate", 5e-4),
-            "batch_size": lstm_config.get("batch_size", 64),
-            "epochs": lstm_config.get("epochs", 80),
-            "early_stopping_patience": lstm_config.get("early_stopping_patience", 15),
-            "l1_lambda": lstm_config.get("l1_lambda", 0.0),
-            "l2_lambda": lstm_config.get("l2_lambda", 1e-4),
+            # No dropout (BatchNorm replaces)
+            "dropout": lstm_config.get("dropout", 0.0),
+            # MQL5: 3e-5
+            "learning_rate": lstm_config.get("learning_rate", 3e-5),
+            # MQL5: 10000
+            "batch_size": lstm_config.get("batch_size", 10000),
+            # MQL5: 500
+            "epochs": lstm_config.get("epochs", 500),
+            # MQL5: 20
+            "early_stopping_patience": lstm_config.get("early_stopping_patience", 20),
+            "l1_lambda": lstm_config.get("l1_lambda", 1e-7),
+            "l2_lambda": lstm_config.get("l2_lambda", 1e-5),
             "label_smoothing": lstm_config.get("label_smoothing", 0.1),
             "lr_warmup_epochs": lstm_config.get("lr_warmup_epochs", 3),
             "lr_min_factor": lstm_config.get("lr_min_factor", 0.01),
-            "max_grad_norm": lstm_config.get("max_grad_norm", 0.5),
-            "gradient_accumulation_steps": lstm_config.get("gradient_accumulation_steps", 4),
+            "max_grad_norm": lstm_config.get("max_grad_norm", 1.0),
+            "gradient_accumulation_steps": lstm_config.get("gradient_accumulation_steps", 1),
             "bidirectional": lstm_config.get("bidirectional", False),
+            # MQL5: BatchNorm enabled
+            "use_batch_norm": lstm_config.get("use_batch_norm", True),
+            # MQL5: Swish
+            "hidden_activation": lstm_config.get("hidden_activation", "swish"),
         }
 
         self.lstm_base = None  # Initialized during fit

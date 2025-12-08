@@ -143,36 +143,38 @@ ENSEMBLE_CONFIG = {
             "tree_method": "hist",      # Histogram-based for memory efficiency
         },
         "lstm": {
-            # Architecture - SIMPLIFIED per expert recommendation
-            # With weak signal, simpler models reduce overfitting
-            "sequence_length": 40,      # Keep 40 for adequate lookback
-            # REDUCED from 40 (expert: smaller capacity)
-            "hidden_size": 32,
-            # REDUCED from 3 (expert: 1 layer baseline)
+            # Architecture - matches MQL5_LSTM.mq5 exactly (adapted for 3-class)
+            # Input: 40 bars × 4 features = 160 input neurons
+            # Structure: Input → BatchNorm → LSTM(40) → Output(3=Buy/Sell/Hold)
+            "sequence_length": 40,      # BarsToLine (40 historical bars)
+            # HiddenLayer (1 LSTM layer with 40 units)
+            "hidden_size": 40,
+            # ONE LSTM layer only (MQL5: HiddenLayers=0 means 1 LSTM)
             "num_layers": 1,
-            "bidirectional": False,     # Unidirectional saves 50% LSTM memory
-            # Activation - author found Swish accelerates training
-            "hidden_activation": "swish",  # Swish > ReLU for hidden layers
-            "use_batch_norm": True,     # Author: "effective replacement for pre-normalization"
-            # Regularization - author used LIGHTER values
-            "dropout": 0.3,             # Author's value
+            "bidirectional": False,     # Unidirectional (MQL5 architecture)
+            # Activation - MQL5 uses AF_NONE for LSTM, Swish for output
+            "hidden_activation": "swish",  # Output layer activation
+            "use_batch_norm": True,     # MQL5 has BatchNorm after input layer
+            # Regularization - MQL5 uses BatchNorm (no dropout with BatchNorm)
+            # ZERO - BatchNorm replaces dropout (MQL5 dropout commented out)
+            "dropout": 0.0,
             "l1_lambda": 1e-7,          # Author's exact value
             "l2_lambda": 1e-5,          # Author's exact value
             "label_smoothing": 0.1,     # Keep for classification
-            # Learning rate - author preferred 3e-4
-            "learning_rate": 3e-4,      # Author's preferred rate
+            # Learning rate - MQL5: 3e-5 (NOT 3e-4)
+            "learning_rate": 3e-5,      # MQL5 exact: LearningRate = 3e-5
             "lr_warmup_epochs": 3,      # Warmup prevents early instability
             "lr_min_factor": 0.01,      # Min LR = 1% of initial
-            # Training schedule - smaller batch for stable gradients
-            "batch_size": 1024,         # Reduced from 5000 for stability
-            "epochs": 200,              # Author used 500-1000
-            "early_stopping_patience": 15,  # Increased - give model time to learn
+            # Training schedule - MQL5: BatchSize=10000, Epochs=500
+            "batch_size": 10000,        # MQL5 exact: BatchSize = 10000
+            "epochs": 500,              # MQL5 exact: Epochs = 500
+            "early_stopping_patience": 20,  # MQL5: CEarlyStopping(20, 0.001)
             # Optimizer - keep AdamW (better than Adam for weight decay)
-            "optimizer": "adamw",
+            "optimizer": "adam",
             "beta1": 0.9,               # Author's value
             "beta2": 0.999,             # Author's value
             # Gradient clipping - prevents exploding gradients
-            "max_grad_norm": 1.0,       # Relaxed from 0.5
+            "max_grad_norm": 1.0,
             # Memory optimization - gradient accumulation for large effective batch
             "gradient_accumulation_steps": 1,
         },
