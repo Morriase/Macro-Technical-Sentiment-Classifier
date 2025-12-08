@@ -168,6 +168,12 @@ class HybridEnsemble:
         dmatrix = xgb.DMatrix(X)
         # get_booster().predict returns flattened probabilities, reshape to (n_samples, n_classes)
         preds = model.get_booster().predict(dmatrix, output_margin=False)
+
+        # Handle Binary Classification (1D output) vs Multiclass (2D output)
+        if len(preds.shape) == 1:
+            # Binary: preds is prob(class=1)
+            return np.column_stack([1 - preds, preds]).astype(np.float32)
+
         n_classes = model.n_classes_
         return preds.reshape(-1, n_classes).astype(np.float32)
 
@@ -448,9 +454,13 @@ class HybridEnsemble:
             logger.info("Generating meta-features from holdout set...")
             xgb_holdout_proba = self._xgb_predict_proba(
                 self.xgb_base, X_holdout)
+            logger.info(f"XGB holdout shape: {xgb_holdout_proba.shape}")
 
             if USE_LSTM and not BASELINE_MODE and self.lstm_base is not None:
                 lstm_holdout_proba = self.lstm_base.predict_proba(X_holdout)
+                logger.info(
+                    f"LSTM holdout shape (raw): {lstm_holdout_proba.shape}")
+
                 # Handle LSTM sequence offset
                 if len(lstm_holdout_proba) < len(xgb_holdout_proba):
                     n_missing = len(xgb_holdout_proba) - \
@@ -461,11 +471,17 @@ class HybridEnsemble:
                         (n_missing, n_classes), 1.0/n_classes, dtype=np.float32)
                     lstm_holdout_proba = np.vstack(
                         [uniform_proba, lstm_holdout_proba])
+
+                logger.info(
+                    f"LSTM holdout shape (padded): {lstm_holdout_proba.shape}")
                 meta_features = np.hstack(
                     [xgb_holdout_proba, lstm_holdout_proba])
             else:
                 # XGBoost-only: meta-features are just XGBoost probabilities
                 meta_features = xgb_holdout_proba
+
+            logger.info(f"Meta-features shape: {meta_features.shape}")
+            logger.info(f"y_holdout shape: {y_holdout.shape}")
 
             # Train meta-classifier
             logger.info("Training meta-classifier...")

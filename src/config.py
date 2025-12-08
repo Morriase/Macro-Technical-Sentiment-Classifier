@@ -166,8 +166,8 @@ ENSEMBLE_CONFIG = {
             "label_smoothing": 0.1,     # Keep for classification
             # Learning rate - increased for learning without activation
             # NO activation after LSTM → needs stronger initial gradients
-            # Increased from 1e-4 → 5e-4 (5x increase for non-activated output)
-            "learning_rate": 5e-4,
+            # Reduced from 5e-4 to 1e-4 to prevent overfitting/divergence
+            "learning_rate": 1e-4,
             "lr_warmup_epochs": 1,          # Reduced to 1 - quick ramp to full LR
             "lr_min_factor": 0.01,      # Min LR = 1% of initial
             # Training schedule - MQL5: BatchSize=10000, Epochs=500
