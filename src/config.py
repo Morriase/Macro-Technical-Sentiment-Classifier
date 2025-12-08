@@ -149,7 +149,7 @@ ENSEMBLE_CONFIG = {
             # Input: 40 bars × 4 features = 160 input neurons
             # Structure: Input → BatchNorm → LSTM(40) → Output(3=Buy/Sell/Hold)
             # NO ACTIVATION after LSTM (LSTM gates provide internal non-linearity via sigmoid/tanh)
-            "sequence_length": 60,      # Increased lookback (was 40)
+            "sequence_length": 128,     # Increased to ~10.5 hours (was 60)
             # HiddenLayer (1 LSTM layer with 40 units)
             "hidden_size": 128,         # Increased capacity (was 40)
             # ONE LSTM layer only (MQL5: HiddenLayers=0 means 1 LSTM)
