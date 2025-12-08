@@ -146,9 +146,9 @@ ENSEMBLE_CONFIG = {
         },
         "lstm": {
             # Architecture - BALANCED: Big enough for GPUs, small enough to learn
-            "sequence_length": 64,      # Back to 40 - sweet spot
-            "hidden_size": 128,          # Moderate size
-            "num_layers": 3,            # Single layer - simpler = better generalization
+            "sequence_length": 40,      # Back to 40 - sweet spot
+            "hidden_size": 64,          # Moderate size
+            "num_layers": 2,            # Single layer - simpler = better generalization
             "bidirectional": False,
             "hidden_activation": None,  # NO activation - LSTM gates provide non-linearity
 
