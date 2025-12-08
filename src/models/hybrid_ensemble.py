@@ -165,9 +165,11 @@ class HybridEnsemble:
         GPU-compatible XGBoost prediction using DMatrix.
         Avoids device mismatch warning when model is on CUDA.
         """
+        # logger.info(f"XGB predict input shape: {X.shape}")
         dmatrix = xgb.DMatrix(X)
         # get_booster().predict returns flattened probabilities, reshape to (n_samples, n_classes)
         preds = model.get_booster().predict(dmatrix, output_margin=False)
+        # logger.info(f"XGB raw preds shape: {preds.shape}")
 
         # Handle Binary Classification (1D output) vs Multiclass (2D output)
         if len(preds.shape) == 1:
@@ -340,7 +342,7 @@ class HybridEnsemble:
         X_scaled = self.scaler.fit_transform(X)
 
         # Memory check - skip OOF for large datasets
-        max_samples_for_oof = 50000
+        max_samples_for_oof = 500000
         if len(X) > max_samples_for_oof:
             logger.info(
                 f"Dataset too large ({len(X):,} samples) for OOF - using simple split")

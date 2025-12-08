@@ -157,12 +157,12 @@ ENSEMBLE_CONFIG = {
             "bidirectional": False,     # Unidirectional (MQL5 architecture)
             # Activation - unused (LSTM has internal non-linearity via gates)
             "hidden_activation": "swish",  # Parameter kept for backward compatibility
-            "use_batch_norm": True,     # MQL5 has BatchNorm after input layer
+            "use_batch_norm": False,     # MQL5 has BatchNorm after input layer
             # Regularization - MQL5 uses BatchNorm (no dropout with BatchNorm)
             # ZERO - BatchNorm replaces dropout (MQL5 dropout commented out)
-            "dropout": 0.0,
-            "l1_lambda": 1e-7,          # Author's exact value
-            "l2_lambda": 1e-5,          # Author's exact value
+            "dropout": 0.3,
+            "l1_lambda": 1e-5,          # Author's exact value
+            "l2_lambda": 1e-4,          # Author's exact value
             "label_smoothing": 0.1,     # Keep for classification
             # Learning rate - increased for learning without activation
             # NO activation after LSTM → needs stronger initial gradients
@@ -200,8 +200,8 @@ ENSEMBLE_CONFIG = {
     },
     # Memory management settings
     "memory": {
-        "max_train_samples": 40000,     # Limit samples for OOF to prevent OOM
-        "max_val_samples": 10000,       # Limit validation samples
+        "max_train_samples": 500000,     # Limit samples for OOF to prevent OOM
+        "max_val_samples": 100000,       # Limit validation samples
         "use_float32": True,            # Use float32 instead of float64
         "aggressive_gc": True,          # Garbage collect after each fold
     },
