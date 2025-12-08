@@ -63,8 +63,12 @@ class LSTMSequenceClassifier(nn.Module):
         self.num_classes = num_classes
         self.bidirectional = bidirectional
 
-        # User instruction: Batch Normalization AND Dropout enabled simultaneously
-        # This allows for both input stabilization and regularization
+        # User instruction: Batch Normalization cannot be used along with Dropout
+        if dropout > 0 and use_batch_norm:
+            logger.warning(
+                "Disabling Batch Normalization because Dropout is enabled.")
+            use_batch_norm = False
+
         self.use_batch_norm = use_batch_norm
         self.hidden_activation = hidden_activation
 
@@ -245,6 +249,12 @@ class LSTMSequenceModel:
         self.use_batch_norm = use_batch_norm
         self.hidden_activation = hidden_activation
 
+        # User instruction: Batch Normalization cannot be used along with Dropout
+        if self.dropout > 0 and self.use_batch_norm:
+            logger.warning(
+                "Disabling Batch Normalization because Dropout is enabled.")
+            self.use_batch_norm = False
+
         # Device - use config or auto-detect
         if device is None:
             self.device = DEVICE
@@ -259,7 +269,7 @@ class LSTMSequenceModel:
             num_classes=num_classes,
             dropout=dropout,
             bidirectional=bidirectional,
-            use_batch_norm=use_batch_norm,
+            use_batch_norm=self.use_batch_norm,  # Use the potentially modified flag
             hidden_activation=hidden_activation,
         ).to(self.device)
 
@@ -274,7 +284,7 @@ class LSTMSequenceModel:
         # Log model info
         param_count = sum(p.numel() for p in self.model.parameters())
         logger.info(f"LSTM initialized: {hidden_size} units × {num_layers} layers, "
-                    f"BatchNorm={use_batch_norm}, Activation=None (LSTM internal), "
+                    f"BatchNorm={self.use_batch_norm}, Activation=None (LSTM internal), "
                     f"Params={param_count:,}")
 
     def prepare_sequences(

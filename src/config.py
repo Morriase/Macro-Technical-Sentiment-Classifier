@@ -167,11 +167,11 @@ ENSEMBLE_CONFIG = {
             # L2: Penalizes large weights (Stability) - Author's value
             "l2_lambda": 1e-5,
 
-            "dropout": 0.3,             # Dropout rate (0.3 to prevent spikes)
+            "dropout": 0.0,             # Disabled to use Batch Norm exclusively
             "label_smoothing": 0.05,    # Reduced smoothing
-            # Learning rate - Optimized for stability per improving_convergence.md
-            # Low LR is critical for financial time series with high variance
-            "learning_rate": 3e-5,      # Reduced to 3e-5 to prevent divergence
+            # Learning rate - Optimized for stability
+            # Increased slightly from 3e-5 to 1e-4 for better convergence with BN
+            "learning_rate": 1e-4,      # Conservative but effective with BN
             "lr_warmup_epochs": 5,      # Increased warmup for stability
             "lr_min_factor": 0.1,       # Min LR = 10% of initial
             # Training schedule - MQL5: BatchSize=10000, Epochs=500
