@@ -744,7 +744,12 @@ class LSTMSequenceModel:
         # Get hidden states
         self.model.eval()
         with torch.no_grad():
-            _, hidden = self.model(X_tensor, return_hidden=True)
+            # Handle DataParallel wrapper - it can't handle return_hidden kwarg or tuple returns
+            if isinstance(self.model, nn.DataParallel):
+                # Access underlying module directly for inference
+                _, hidden = self.model.module(X_tensor, return_hidden=True)
+            else:
+                _, hidden = self.model(X_tensor, return_hidden=True)
 
         return hidden.cpu().numpy()
 
