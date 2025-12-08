@@ -145,39 +145,46 @@ ENSEMBLE_CONFIG = {
             "num_class": 2,             # Changed from 3 to 2 (Buy/Sell)
         },
         "lstm": {
-            # Architecture - BALANCED for convergence and generalization
-            "sequence_length": 128,     # Increased to 128 for more context (was 40)
-            "hidden_size": 64,          # Increased to 64 for more capacity (was 32)
-            "num_layers": 2,            # Increased to 2 layers (was 1)
+            # Architecture - OPTIMIZED per MQL5 standards from LSTM_NUANCES.md
+            "sequence_length": 40,      # MQL5 standard: 40 bars (BarsToLine)
+            "hidden_size": 40,          # MQL5 standard: 40 units (HiddenLayer)
+            # MQL5 standard: 1 LSTM layer (no hidden layers)
+            "num_layers": 1,
             "bidirectional": False,     # Unidirectional
-            "hidden_activation": None,  # No activation (LSTM internal)
-            
-            # CRITICAL: Use Dropout instead of BatchNorm for regularization
-            "use_batch_norm": False,    # DISABLED - using dropout instead
-            "dropout": 0.3,             # Moderate dropout (was 0.4)
+            # No activation (LSTM internal gates provide non-linearity)
+            "hidden_activation": None,
 
-            # Regularization - BALANCED to allow learning while preventing overfitting
-            "l1_lambda": 1e-6,          # Reduced from 1e-5
-            "l2_lambda": 1e-4,          # Reduced from 1e-3
+            # CRITICAL: BatchNorm ONLY (NO Dropout) per LSTM_NUANCES.md
+            # "Batch Normalization itself functions as regularization"
+            # "Dropout disrupts BN statistics" → use ONE or the OTHER, not both
+            "use_batch_norm": True,     # ENABLED - MQL5 standard, provides regularization
+            "dropout": 0.0,             # DISABLED - BatchNorm replaces dropout
 
-            "label_smoothing": 0.1,     # Moderate smoothing (was 0.15)
-            
-            # Learning rate - OPTIMIZED for convergence
-            "learning_rate": 1e-4,      # Increased from 5e-5 for faster learning
-            "lr_warmup_epochs": 10,     # Longer warmup (was 5)
+            # Regularization - MINIMAL per author's MQL5 implementation
+            "l1_lambda": 1e-7,          # Author's value: 1e-7 (Elastic Net)
+            "l2_lambda": 1e-5,          # Author's value: 1e-5 (Elastic Net)
+
+            "label_smoothing": 0.1,     # Standard: 0.1
+
+            # Learning rate - CRITICAL per LSTM_NUANCES.md
+            # "Low learning rate due to high complexity/variance of financial data"
+            # Author uses 3e-5 or 0.0003 (same value)
+            "learning_rate": 3e-5,      # Author's value: 3e-5 (NOT 1e-4)
+            "lr_warmup_epochs": 5,      # Author's value: 5 epochs
             "lr_min_factor": 0.01,      # Min LR = 1% of initial
-            
-            # Training schedule
-            "batch_size": 2048,         # Keep same
-            "epochs": 200,              # Max epochs
-            "early_stopping_patience": 25,  # More patience for slower learning
-            
-            # Optimizer
-            "optimizer": "adamw",       # AdamW with strong weight decay
-            "beta1": 0.9,
-            "beta2": 0.999,
-            "max_grad_norm": 0.5,       # Tighter gradient clipping
-            
+
+            # Training schedule - AUTHOR'S VALUES
+            # Author's Python value: 1000 (was 10000 for MQL5)
+            "batch_size": 1000,
+            "epochs": 500,              # Author's value: 500 epochs
+            "early_stopping_patience": 5,  # Author's value: 5 epochs patience
+
+            # Optimizer - AUTHOR'S ADAM PARAMETERS
+            "optimizer": "adamw",       # AdamW (decoupled weight decay)
+            "beta1": 0.9,               # Author's default
+            "beta2": 0.999,             # Author's default
+            "max_grad_norm": 1.0,       # Standard gradient clipping
+
             # Classification
             "num_classes": 2,
             "gradient_accumulation_steps": 1,

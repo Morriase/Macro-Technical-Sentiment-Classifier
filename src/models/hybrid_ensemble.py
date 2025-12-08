@@ -97,41 +97,39 @@ class HybridEnsemble:
         self.lstm_params = lstm_params or {
             # TUNED: 40 → 20 (reduce overfitting, shorter sequences)
             "sequence_length": lstm_config.get("sequence_length", 20),
-            # Keep: MQL5 standard
+            # MQL5 STANDARD PARAMETERS (from LSTM_NUANCES.md)
+            "sequence_length": lstm_config.get("sequence_length", 40),
             "hidden_size": lstm_config.get("hidden_size", 40),
-            # Keep: 1 LSTM layer (MQL5 standard)
             "num_layers": lstm_config.get("num_layers", 1),
             "num_classes": 2,  # BINARY: Buy/Sell
-            # Keep: No dropout (BatchNorm replaces)
+            # CRITICAL: BatchNorm ONLY (NO Dropout) per LSTM_NUANCES.md
             "dropout": lstm_config.get("dropout", 0.0),
-            # TUNED: 3e-5 → 1e-5 (lower for financial data stability)
-            "learning_rate": lstm_config.get("learning_rate", 1e-5),
-            # TUNED: 10000 → 2000 (more gradient updates per epoch)
-            "batch_size": lstm_config.get("batch_size", 2000),
-            # Keep: 500 epochs
-            "epochs": lstm_config.get("epochs", 500),
-            # TUNED: 20 → 30 (more patience for convergence)
-            "early_stopping_patience": lstm_config.get("early_stopping_patience", 30),
-            # TUNED: 1e-7 → 1e-5 (100x stronger L1 regularization)
-            "l1_lambda": lstm_config.get("l1_lambda", 1e-5),
-            # TUNED: 1e-5 → 1e-4 (10x stronger L2 regularization)
-            "l2_lambda": lstm_config.get("l2_lambda", 1e-4),
-            # TUNED: 0.1 → 0.15 (stronger label smoothing)
-            "label_smoothing": lstm_config.get("label_smoothing", 0.15),
-            # TUNED: 3 → 5 (longer warmup for stability)
-            "lr_warmup_epochs": lstm_config.get("lr_warmup_epochs", 5),
-            # Keep: 0.01 minimum LR factor
-            "lr_min_factor": lstm_config.get("lr_min_factor", 0.01),
-            # TUNED: 1.0 → 0.5 (tighter gradient clipping)
-            "max_grad_norm": lstm_config.get("max_grad_norm", 0.5),
-            # Keep: No gradient accumulation
-            "gradient_accumulation_steps": lstm_config.get("gradient_accumulation_steps", 1),
-            # Keep: Unidirectional (MQL5 standard)
-            "bidirectional": lstm_config.get("bidirectional", False),
-            # Keep: BatchNorm enabled (MQL5 standard)
             "use_batch_norm": lstm_config.get("use_batch_norm", True),
-            # Keep: Swish activation
-            "hidden_activation": lstm_config.get("hidden_activation", "swish"),
+            # AUTHOR'S LEARNING RATE (3e-5, NOT 1e-5)
+            "learning_rate": lstm_config.get("learning_rate", 3e-5),
+            # AUTHOR'S BATCH SIZE (1000 for Python, not 2000)
+            "batch_size": lstm_config.get("batch_size", 1000),
+            # AUTHOR'S EPOCHS (500)
+            "epochs": lstm_config.get("epochs", 500),
+            # AUTHOR'S EARLY STOPPING (5 epochs patience)
+            "early_stopping_patience": lstm_config.get("early_stopping_patience", 5),
+            # AUTHOR'S REGULARIZATION (Elastic Net: 1e-7 L1, 1e-5 L2)
+            "l1_lambda": lstm_config.get("l1_lambda", 1e-7),
+            "l2_lambda": lstm_config.get("l2_lambda", 1e-5),
+            # STANDARD LABEL SMOOTHING
+            "label_smoothing": lstm_config.get("label_smoothing", 0.1),
+            # AUTHOR'S WARMUP (5 epochs)
+            "lr_warmup_epochs": lstm_config.get("lr_warmup_epochs", 5),
+            # STANDARD MIN LR FACTOR
+            "lr_min_factor": lstm_config.get("lr_min_factor", 0.01),
+            # STANDARD GRADIENT CLIPPING
+            "max_grad_norm": lstm_config.get("max_grad_norm", 1.0),
+            # NO GRADIENT ACCUMULATION
+            "gradient_accumulation_steps": lstm_config.get("gradient_accumulation_steps", 1),
+            # UNIDIRECTIONAL (MQL5 standard)
+            "bidirectional": lstm_config.get("bidirectional", False),
+            # NO ACTIVATION (LSTM internal gates provide non-linearity)
+            "hidden_activation": lstm_config.get("hidden_activation", None),
         }
 
         self.lstm_base = None  # Initialized during fit
