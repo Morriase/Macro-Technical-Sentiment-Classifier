@@ -145,39 +145,40 @@ ENSEMBLE_CONFIG = {
             "num_class": 2,             # Changed from 3 to 2 (Buy/Sell)
         },
         "lstm": {
-            # Architecture - MINIMAL to prevent overfitting
-            "sequence_length": 40,      # MQL5: 40 bars
-            "hidden_size": 32,          # REDUCED from 40 - smaller = less overfitting
-            "num_layers": 1,            # 1 layer only
+            # Architecture - BIGGER to saturate 2x T4 GPUs (32GB VRAM total)
+            # But with HEAVY regularization to prevent overfitting
+            "sequence_length": 64,      # INCREASED from 40 - more context, more VRAM
+            "hidden_size": 128,         # INCREASED from 32 - bigger model, more VRAM
+            "num_layers": 2,            # INCREASED from 1 - deeper model, more VRAM
             "bidirectional": False,
             "hidden_activation": None,  # NO activation - LSTM gates provide non-linearity
 
             # Regularization - DROPOUT ONLY (no BatchNorm)
+            # HEAVY regularization to compensate for bigger model
             "use_batch_norm": False,    # DISABLED per user preference
-            "dropout": 0.5,             # INCREASED to 0.5 - aggressive dropout
+            "dropout": 0.6,             # VERY HIGH dropout for big model
 
             # Weight regularization - EXTREME to prevent overfitting
-            # Model overfits by epoch 5, need much stronger regularization
-            "l1_lambda": 1e-5,          # 10x stronger L1
-            "l2_lambda": 1e-2,          # EXTREME L2 (was 5e-3)
+            "l1_lambda": 1e-4,          # Strong L1 (sparsity)
+            "l2_lambda": 5e-2,          # VERY STRONG L2 (weight decay)
 
-            "label_smoothing": 0.2,     # INCREASED to 0.2 - softer targets
+            "label_smoothing": 0.2,     # Soft targets
 
-            # Learning rate - VERY LOW to slow down learning
-            "learning_rate": 1e-5,      # REDUCED from 3e-5 - slower learning
-            "lr_warmup_epochs": 3,      # Shorter warmup
+            # Learning rate - LOW for stability with big model
+            "learning_rate": 5e-5,      # Moderate LR
+            "lr_warmup_epochs": 5,      # Warmup
             "lr_min_factor": 0.1,       # Higher min LR
 
-            # Training schedule
-            "batch_size": 2048,         # Keep big for GPU utilization
+            # Training schedule - BIG BATCHES to saturate GPUs
+            "batch_size": 8192,         # HUGE batch - fill those T4s!
             "epochs": 500,
-            "early_stopping_patience": 10,  # REDUCED - stop faster when overfitting
+            "early_stopping_patience": 15,
 
             # Optimizer
             "optimizer": "adamw",
             "beta1": 0.9,
             "beta2": 0.999,
-            "max_grad_norm": 0.3,       # EVEN TIGHTER gradient clipping
+            "max_grad_norm": 0.5,       # Gradient clipping
 
             # Classification
             "num_classes": 2,
