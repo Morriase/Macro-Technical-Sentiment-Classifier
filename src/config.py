@@ -160,16 +160,16 @@ ENSEMBLE_CONFIG = {
             "use_batch_norm": True,      # Enabled for faster convergence
             # Regularization - MQL5 uses BatchNorm (no dropout with BatchNorm)
             # ZERO - BatchNorm replaces dropout (MQL5 dropout commented out)
-            "dropout": 0.2,             # Reduced dropout (was 0.3)
-            "l1_lambda": 1e-6,          # Reduced regularization
-            "l2_lambda": 1e-5,          # Reduced regularization
+            "dropout": 0.3,             # Increased to 0.3 to prevent spikes
+            "l1_lambda": 1e-5,          # Increased regularization
+            "l2_lambda": 1e-4,          # Increased regularization
             "label_smoothing": 0.05,    # Reduced smoothing
             # Learning rate - increased for learning without activation
             # NO activation after LSTM → needs stronger initial gradients
             # Reduced from 5e-4 to 1e-4 to prevent overfitting/divergence
             # Increased for faster learning (was 1e-4)
-            "learning_rate": 1e-3,
-            "lr_warmup_epochs": 3,      # Increased warmup
+            "learning_rate": 5e-4,      # Reduced from 1e-3 to stabilize training
+            "lr_warmup_epochs": 5,      # Increased warmup for stability
             "lr_min_factor": 0.1,       # Min LR = 10% of initial
             # Training schedule - MQL5: BatchSize=10000, Epochs=500
             "batch_size": 2048,         # Reduced from 10000 for more updates
@@ -179,8 +179,7 @@ ENSEMBLE_CONFIG = {
             "optimizer": "adamw",       # Explicitly use AdamW
             "beta1": 0.9,               # Author's value
             "beta2": 0.999,             # Author's value
-            # Gradient clipping - prevents exploding gradients
-            "max_grad_norm": 1.0,
+            "max_grad_norm": 0.5,       # Aggressive clipping to prevent spikes
             # BINARY CLASSIFICATION UPDATE
             "num_classes": 2,           # Changed from 3 to 2 (Buy/Sell)
             # Memory optimization - gradient accumulation for large effective batch
