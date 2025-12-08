@@ -54,7 +54,7 @@ FRED_API_KEY = os.getenv("FRED_API_KEY", "")
 
 # Currency Pairs Configuration
 # First batch (training now)
-CURRENCY_PAIRS = ["EUR_USD", "GBP_USD", "USD_JPY", "AUD_USD"]
+CURRENCY_PAIRS = ["EUR_USD"]
 # Second batch (train later): ["XAU_USD", "USD_CAD", "USD_CHF", "NZD_USD"]
 
 PRIMARY_PAIR = "EUR_USD"  # Primary pair for training and evaluation
@@ -147,14 +147,14 @@ ENSEMBLE_CONFIG = {
         "lstm": {
             # Architecture - BALANCED: Big enough for GPUs, small enough to learn
             "sequence_length": 40,      # Back to 40 - sweet spot
-            "hidden_size": 60,          # Moderate size
-            "num_layers": 1,            # Single layer - simpler = better generalization
+            "hidden_size": 128,          # Moderate size
+            "num_layers": 2,            # Single layer - simpler = better generalization
             "bidirectional": False,
             "hidden_activation": None,  # NO activation - LSTM gates provide non-linearity
 
             # Regularization - BatchNorm only
             "use_batch_norm": False,     # ENABLED - stabilizes training
-            "dropout": 0.2,             # DISABLED - use BatchNorm only
+            "dropout": 0.0,             # DISABLED - use BatchNorm only
 
             # Weight regularization - BALANCED
             "l1_lambda": 1e-6,          # Light L1
