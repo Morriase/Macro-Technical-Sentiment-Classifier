@@ -147,7 +147,7 @@ ENSEMBLE_CONFIG = {
         "lstm": {
             # Architecture - BALANCED: Big enough for GPUs, small enough to learn
             "sequence_length": 40,      # Back to 40 - sweet spot
-            "hidden_size": 64,          # Moderate size
+            "hidden_size": 32,          # Moderate size
             "num_layers": 2,            # Single layer - simpler = better generalization
             "bidirectional": False,
             "hidden_activation": None,  # NO activation - LSTM gates provide non-linearity
@@ -160,7 +160,7 @@ ENSEMBLE_CONFIG = {
             "l1_lambda": 1e-6,          # Light L1
             "l2_lambda": 1e-3,          # Moderate L2
 
-            "label_smoothing": 0.05,     # Standard smoothing
+            "label_smoothing": 0.005,     # Standard smoothing
 
             # Learning rate - MODERATE for stable learning
             "learning_rate": 3e-5,      # Standard rate
@@ -168,9 +168,9 @@ ENSEMBLE_CONFIG = {
             "lr_min_factor": 0.01,      # Standard min
 
             # Training schedule - LARGE BATCHES for GPU saturation
-            "batch_size": 4096,         # Large batch (not extreme)
+            "batch_size": 40000,         # Large batch (not extreme)
             "epochs": 500,
-            "early_stopping_patience": 20,
+            "early_stopping_patience": 5,
 
             # Optimizer
             "optimizer": "adamw",
