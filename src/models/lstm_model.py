@@ -416,10 +416,31 @@ class LSTMSequenceModel:
         self.train_accs = []
         self.val_accs = []
 
-        # CLASS WEIGHTS: Address severe imbalance (Buy 13%, Sell 13%, Hold 74%)
-        # Weights ~= inverse frequency: 74/13 ≈ 5.7, using 5.5 for Buy/Sell
-        # Class mapping: Buy=0, Sell=1, Hold=2
-        class_weights = torch.tensor([5.5, 5.5, 1.0], device=self.device)
+        # CLASS WEIGHTS: Dynamic calculation based on training data
+        # Handles both Binary (Buy/Sell) and Multi-class (Buy/Sell/Hold)
+        from sklearn.utils.class_weight import compute_class_weight
+
+        # Ensure y is numpy array
+        y_np = np.array(y)
+        unique_classes = np.unique(y_np)
+
+        # Calculate balanced weights
+        weights = compute_class_weight(
+            class_weight='balanced',
+            classes=unique_classes,
+            y=y_np
+        )
+
+        # Map to full weight tensor (handle missing classes if any)
+        full_weights = np.ones(self.num_classes, dtype=np.float32)
+        for cls, weight in zip(unique_classes, weights):
+            if int(cls) < self.num_classes:
+                full_weights[int(cls)] = weight
+
+        class_weights = torch.tensor(
+            full_weights, device=self.device, dtype=torch.float32)
+        logger.info(
+            f"Using dynamic class weights: {class_weights.cpu().numpy()}")
 
         # Loss function with class weights and label smoothing
         criterion = nn.CrossEntropyLoss(

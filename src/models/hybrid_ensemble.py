@@ -479,7 +479,7 @@ class HybridEnsemble:
             # Train base learners on full training set
             from sklearn.utils.class_weight import compute_sample_weight
             sample_weights = compute_sample_weight(
-                class_weight={0: 3.0, 1: 3.0, 2: 1.0},
+                class_weight='balanced',
                 y=y
             )
 
