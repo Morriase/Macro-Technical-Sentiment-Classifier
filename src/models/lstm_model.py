@@ -62,6 +62,13 @@ class LSTMSequenceClassifier(nn.Module):
         self.num_layers = num_layers
         self.num_classes = num_classes
         self.bidirectional = bidirectional
+
+        # User instruction: Batch Normalization cannot be used along with Dropout
+        if dropout > 0 and use_batch_norm:
+            logger.warning(
+                "Disabling Batch Normalization because Dropout is enabled.")
+            use_batch_norm = False
+
         self.use_batch_norm = use_batch_norm
         self.hidden_activation = hidden_activation
 

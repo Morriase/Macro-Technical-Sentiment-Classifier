@@ -455,8 +455,10 @@ class HybridEnsemble:
                 if len(lstm_holdout_proba) < len(xgb_holdout_proba):
                     n_missing = len(xgb_holdout_proba) - \
                         len(lstm_holdout_proba)
+                    # Dynamic class count based on actual predictions
+                    n_classes = lstm_holdout_proba.shape[1]
                     uniform_proba = np.full(
-                        (n_missing, 3), 1.0/3, dtype=np.float32)
+                        (n_missing, n_classes), 1.0/n_classes, dtype=np.float32)
                     lstm_holdout_proba = np.vstack(
                         [uniform_proba, lstm_holdout_proba])
                 meta_features = np.hstack(
