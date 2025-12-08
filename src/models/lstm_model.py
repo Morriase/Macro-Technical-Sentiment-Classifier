@@ -273,6 +273,13 @@ class LSTMSequenceModel:
             hidden_activation=hidden_activation,
         ).to(self.device)
 
+        # Multi-GPU Support (DataParallel) - only if multiple GPUs available
+        # NOTE: DataParallel only exposes forward(), not custom methods like predict_proba()
+        # The predict_proba() method handles this by checking isinstance(self.model, nn.DataParallel)
+        if torch.cuda.device_count() > 1:
+            logger.info(f"Using {torch.cuda.device_count()} GPUs for training")
+            self.model = nn.DataParallel(self.model)
+
         # Mixed precision training (for faster GPU training)
         self.use_amp = GPU_CONFIG['mixed_precision']
         self.scaler_amp = GradScaler('cuda') if self.use_amp else None
@@ -684,7 +691,14 @@ class LSTMSequenceModel:
             for i in range(0, len(X_seq), batch_size):
                 batch = torch.FloatTensor(
                     X_seq[i:i+batch_size]).to(self.device)
-                probs = self.model.predict_proba(batch)
+                
+                # Handle DataParallel wrapper - it only exposes forward(), not predict_proba()
+                if isinstance(self.model, nn.DataParallel):
+                    logits = self.model(batch)
+                    probs = torch.softmax(logits, dim=1)
+                else:
+                    probs = self.model.predict_proba(batch)
+                
                 all_probs.append(probs.cpu().numpy().astype(np.float32))
                 del batch, probs
                 if torch.cuda.is_available():

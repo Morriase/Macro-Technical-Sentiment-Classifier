@@ -145,47 +145,43 @@ ENSEMBLE_CONFIG = {
             "num_class": 2,             # Changed from 3 to 2 (Buy/Sell)
         },
         "lstm": {
-            # Architecture - matches MQL5_LSTM.mq5 exactly (adapted for 3-class)
-            # Input: 40 bars × 4 features = 160 input neurons
-            # Structure: Input → BatchNorm → LSTM(40) → Output(3=Buy/Sell/Hold)
+            # Architecture - matches MQL5_LSTM.mq5 exactly per LSTM_NUANCES.md
+            # Input: 40 bars × N features per bar
+            # Structure: Input → BatchNorm → LSTM(40) → Output(2=Buy/Sell)
             # NO ACTIVATION after LSTM (LSTM gates provide internal non-linearity via sigmoid/tanh)
-            "sequence_length": 128,     # Increased to ~10.5 hours (was 60)
-            # HiddenLayer (1 LSTM layer with 40 units)
-            "hidden_size": 128,         # Increased capacity (was 40)
+            "sequence_length": 40,      # MQL5 standard: 40 bars (BarsToLine)
+            # HiddenLayer - MQL5: 40 neurons
+            "hidden_size": 40,          # MQL5 standard: 40 units
             # ONE LSTM layer only (MQL5: HiddenLayers=0 means 1 LSTM)
-            "num_layers": 2,            # Increased depth (was 1)
+            "num_layers": 1,            # MQL5 standard: 1 layer
             "bidirectional": False,     # Unidirectional (MQL5 architecture)
             # Activation - unused (LSTM has internal non-linearity via gates)
-            "hidden_activation": "swish",  # Parameter kept for backward compatibility
-            "use_batch_norm": True,      # Enabled for faster convergence
+            "hidden_activation": None,  # No activation per LSTM_NUANCES.md
+            "use_batch_norm": True,     # Enabled - stabilizes training
 
-            # Elastic Net Regularization (L1 + L2)
-            # Combines L1 (Lasso) for feature selection and L2 (Ridge) for weight stability.
-            # Helps combat overfitting and stabilizes training (prevents spikes).
-            # L1: Forces irrelevant weights to zero (Sparsity) - Author's value
-            "l1_lambda": 1e-7,
-            # L2: Penalizes large weights (Stability) - Author's value
-            "l2_lambda": 1e-5,
+            # Elastic Net Regularization (L1 + L2) per LSTM_NUANCES.md
+            # L1: Forces irrelevant weights to zero (Sparsity)
+            "l1_lambda": 1e-7,          # Author's exact value
+            # L2: Penalizes large weights (Stability)
+            "l2_lambda": 1e-5,          # Author's exact value
 
-            "dropout": 0.0,             # Disabled to use Batch Norm exclusively
-            "label_smoothing": 0.05,    # Reduced smoothing
-            # Learning rate - Optimized for stability
-            # Increased slightly from 3e-5 to 1e-4 for better convergence with BN
-            "learning_rate": 1e-4,      # Conservative but effective with BN
-            "lr_warmup_epochs": 5,      # Increased warmup for stability
-            "lr_min_factor": 0.1,       # Min LR = 10% of initial
-            # Training schedule - MQL5: BatchSize=10000, Epochs=500
-            "batch_size": 2048,         # Reduced from 10000 for more updates
-            "epochs": 200,              # Reduced epochs (faster convergence)
-            "early_stopping_patience": 5,   # Reduced to 5 per resource recommendation
-            # Optimizer - keep AdamW (better than Adam for weight decay)
-            "optimizer": "adamw",       # Explicitly use AdamW
+            "dropout": 0.0,             # Disabled - BatchNorm replaces dropout
+            "label_smoothing": 0.0,     # Disabled for cleaner gradients
+            # Learning rate - CRITICAL: Must be very low per LSTM_NUANCES.md
+            "learning_rate": 3e-5,      # Author's exact value (NOT 1e-4!)
+            "lr_warmup_epochs": 3,      # Brief warmup
+            "lr_min_factor": 0.01,      # Min LR = 1% of initial
+            # Training schedule - MQL5 exact values
+            "batch_size": 10000,        # MQL5 standard: 10000
+            "epochs": 500,              # MQL5 standard: 500
+            "early_stopping_patience": 5,   # Author's value
+            # Optimizer - Adam per LSTM_NUANCES.md (not AdamW)
+            "optimizer": "adam",        # Author uses Adam, not AdamW
             "beta1": 0.9,               # Author's value
             "beta2": 0.999,             # Author's value
-            "max_grad_norm": 0.5,       # Aggressive clipping to prevent spikes
-            # BINARY CLASSIFICATION UPDATE
-            "num_classes": 2,           # Changed from 3 to 2 (Buy/Sell)
-            # Memory optimization - gradient accumulation for large effective batch
+            "max_grad_norm": 1.0,       # Standard clipping
+            # BINARY CLASSIFICATION
+            "num_classes": 2,           # Buy/Sell
             "gradient_accumulation_steps": 1,
         },
     },
