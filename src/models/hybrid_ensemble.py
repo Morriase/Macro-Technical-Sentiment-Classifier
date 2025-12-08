@@ -504,6 +504,12 @@ class HybridEnsemble:
             )
 
             logger.info("Training XGBoost base learner on full dataset")
+            # Create XGBoost config without early stopping for final fit
+            xgb_config_final = self.xgb_params.copy()
+            xgb_config_final.pop('early_stopping_rounds', None)  # Remove early stopping
+            xgb_config_final.pop('eval_metric', None)  # Remove eval metric
+            
+            self.xgb_base = xgb.XGBClassifier(**xgb_config_final)
             self.xgb_base.fit(
                 X_scaled, y, sample_weight=sample_weights, verbose=50)
 

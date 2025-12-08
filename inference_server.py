@@ -173,11 +173,10 @@ def engineer_features_from_ohlcv(df_m5: pd.DataFrame, df_h1: pd.DataFrame, df_h4
     """
     Engineer features from OHLCV data using EXACT training pipeline
 
-    CRITICAL: Must match training exactly (81 features)
-    - 67 base technical features (M5)
-    - 14 multi-timeframe features (H1 + H4)
-    - 3 macro features (tau_pre, tau_post, weighted_surprise)
-    - 0 sentiment features (not trained)
+    CRITICAL: Must match training exactly (38 features)
+    - 25 base technical features (M5)
+    - 8 multi-timeframe features (H1 + H4)
+    - 5 FRED macro features (rate_differential, vix, yield_curve, dxy_index, oil_price)
 
     Args:
         df_m5: M5 OHLCV DataFrame
@@ -192,8 +191,7 @@ def engineer_features_from_ohlcv(df_m5: pd.DataFrame, df_h1: pd.DataFrame, df_h4
     logger.info(
         f"Engineering features for {pair} from M5={len(df_m5)}, H1={len(df_h1)}, H4={len(df_h4)} candles")
 
-    # Step 1: Base technical features on M5 (~18 features - OPTIMIZED)
-    # Removed redundant indicators: Stochastic, BB, CCI, ATR per author's correlation analysis
+    # Step 1: Base technical features on M5 (~25 features - OPTIMIZED)
     df_features = TECH_ENGINEER.calculate_all_features(df_m5.copy())
     logger.info(
         f"✓ Calculated {len(df_features.columns)} base technical features")
@@ -214,12 +212,62 @@ def engineer_features_from_ohlcv(df_m5: pd.DataFrame, df_h1: pd.DataFrame, df_h4
         logger.error(f"Failed to add MTF features: {e}")
         raise ValueError(f"MTF feature engineering failed: {e}")
 
-    # Step 3: Macro features (fallback if FRED not available)
-    # FRED provides: rate_differential, vix, yield_curve, gdp_growth_diff, etc.
-    # Fallback uses: tau_pre, tau_post, weighted_surprise from calendar events
-    df_features["tau_pre"] = 0.0
-    df_features["tau_post"] = 0.0
-    df_features["weighted_surprise"] = 0.0
+    # Step 3: Macro features (FRED ONLY)
+    if FRED_LOADER is not None:
+        logger.info(f"Fetching FRED macro features for {pair}...")
+        try:
+            start_date = df_features.index.min().to_pydatetime()
+            end_date = df_features.index.max().to_pydatetime()
+
+            fred_macro_df = FRED_LOADER.get_macro_features_for_pair(
+                pair, start_date, end_date
+            )
+
+            if not fred_macro_df.empty:
+                key_fred_features = ['rate_differential', 'vix',
+                                     'yield_curve', 'dxy_index', 'oil_price']
+                selected_cols = [
+                    'date'] + [col for col in key_fred_features if col in fred_macro_df.columns]
+                fred_macro_df = fred_macro_df[selected_cols]
+
+                original_index_name = df_features.index.name or 'date'
+                df_features = df_features.reset_index()
+
+                if original_index_name != 'date' and original_index_name in df_features.columns:
+                    df_features = df_features.rename(
+                        columns={original_index_name: 'date'})
+
+                df_features['date'] = pd.to_datetime(
+                    df_features['date']).dt.date
+                fred_macro_df['date'] = pd.to_datetime(
+                    fred_macro_df['date']).dt.date
+
+                df_features = pd.merge(
+                    df_features, fred_macro_df, on='date', how='left')
+
+                macro_cols = [
+                    col for col in fred_macro_df.columns if col != 'date']
+                for col in macro_cols:
+                    if col in df_features.columns:
+                        df_features[col] = df_features[col].ffill().fillna(0)
+
+                df_features['date'] = pd.to_datetime(df_features['date'])
+                df_features = df_features.set_index('date')
+                logger.success(
+                    f"✓ Added {len(macro_cols)} FRED macro features")
+            else:
+                logger.warning(
+                    "No FRED macro data available - adding placeholders")
+                for col in ['rate_differential', 'vix', 'yield_curve', 'dxy_index', 'oil_price']:
+                    df_features[col] = 0.0
+        except Exception as e:
+            logger.warning(f"⚠ Failed to fetch FRED macro features: {e}")
+            for col in ['rate_differential', 'vix', 'yield_curve', 'dxy_index', 'oil_price']:
+                df_features[col] = 0.0
+    else:
+        logger.warning("No FRED loader available - adding placeholders")
+        for col in ['rate_differential', 'vix', 'yield_curve', 'dxy_index', 'oil_price']:
+            df_features[col] = 0.0
 
     # Drop NaN
     initial_len = len(df_features)
@@ -241,76 +289,7 @@ def engineer_features_from_ohlcv(df_m5: pd.DataFrame, df_h1: pd.DataFrame, df_h4
     logger.success(
         f"Engineered {len(feature_cols)} features, {len(df_features)} samples after dropna")
 
-    return df_features, feature_cols  # Return full DataFrame for macro engineering
-
-
-def engineer_macro_features(events_data: list, df_features: pd.DataFrame) -> pd.DataFrame:
-    """
-    Engineer macro features from raw calendar events using EXACT training pipeline
-
-    Args:
-        events_data: List of raw calendar events from EA
-            [
-                {
-                    "timestamp": "2025-11-08T14:30:00",
-                    "event_name": "NFP",
-                    "country": "US",
-                    "actual": 150000,
-                    "forecast": 180000,
-                    "previous": 200000,
-                    "impact": "high"
-                }
-            ]
-        df_features: DataFrame with technical features and index (timestamps)
-
-    Returns:
-        DataFrame with macro features added (tau_pre, tau_post, weighted_surprise)
-    """
-    if not events_data or len(events_data) == 0:
-        logger.info("No calendar events provided - using zero macro features")
-        return df_features
-
-    logger.info(
-        f"Engineering macro features from {len(events_data)} calendar events")
-
-    try:
-        # Convert events to DataFrame with required structure
-        df_events = pd.DataFrame(events_data)
-
-        # Ensure timestamp column is datetime
-        df_events['timestamp'] = pd.to_datetime(df_events['timestamp'])
-
-        # Calculate surprise factor: (actual - forecast) / std(previous values)
-        # This matches the training data calculation
-        if 'actual' in df_events.columns and 'forecast' in df_events.columns:
-            # Simple normalized surprise
-            df_events['surprise_zscore'] = (
-                (df_events['actual'] - df_events['forecast']) /
-                (df_events['previous'].std() + 1e-8)  # Avoid division by zero
-            )
-        else:
-            logger.warning(
-                "Events missing actual/forecast - using zero surprise")
-            df_events['surprise_zscore'] = 0.0
-
-        # Use EXACT same function as training
-        df_features = MACRO_ENGINEER.calculate_temporal_proximity(
-            events_df=df_events,
-            price_df=df_features,
-            pre_event_hours=48,   # Same as training
-            post_event_hours=48,  # Same as training
-            decay_lambda=0.1      # Same as training
-        )
-
-        logger.success(
-            f"Macro features engineered: tau_pre, tau_post, weighted_surprise")
-
-    except Exception as e:
-        logger.error(f"Failed to engineer macro features: {e}")
-        logger.info("Falling back to zero macro features")
-        # Keep the zeros already set
-
-    return df_features
+    return df_features, feature_cols
 
 
 def validate_features(feature_names: list, schema: dict, pair: str):
@@ -511,7 +490,7 @@ def predict():
         "confidence": 0.85,
         "probabilities": {"BUY": 0.85, "SELL": 0.10, "HOLD": 0.05},
         "timestamp": "2025-01-01 00:05:00",
-        "feature_count": 81,  // 67 base + 14 MTF + 3 macro + 0 sentiment
+        "feature_count": 38,  // 25 base + 8 MTF + 5 FRED macro
         "status": "success"
     }
     """
@@ -574,12 +553,9 @@ def predict():
         # Load model and schema
         model, schema = load_model_and_schema(pair)
 
-        # Engineer features using real M5, H1, and H4 data (81 features total)
+        # Engineer features using real M5, H1, and H4 data (38 features total)
         df_features, feature_names = engineer_features_from_ohlcv(
             df_m5, df_h1, df_h4, pair)
-
-        # Engineer macro features (3 features: tau_pre, tau_post, weighted_surprise)
-        df_features = engineer_macro_features(events_data, df_features)
 
         # SENTIMENT FEATURES DISABLED
         # Models were trained WITHOUT sentiment features (news dataset not attached in Kaggle)
@@ -588,7 +564,7 @@ def predict():
         if ENABLE_LIVE_SENTIMENT:
             logger.warning(
                 "⚠ ENABLE_LIVE_SENTIMENT=True but models not trained with sentiment! "
-                "Ignoring sentiment to match training (81 features)."
+                "Ignoring sentiment to match training (38 features)."
             )
 
         # Extract final feature array

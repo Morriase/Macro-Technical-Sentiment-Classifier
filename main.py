@@ -240,30 +240,9 @@ class ForexClassifierPipeline:
             logger.warning(
                 "No higher timeframe data available. Skipping MTF feature engineering.")
 
-        # --- Step 2.3: Macro Features (Hybrid: Calendar Events + FRED) ---
-
-        # 1. Calculate Temporal Proximity Features (from Calendar Events)
-        # These capture high-frequency volatility shocks (NFP, CPI releases)
-        if self.df_events is not None and not self.df_events.empty and self.macro_data:
-            logger.info(
-                "Calculating temporal proximity features from macro events...")
-            # Ensure 'date' column is treated as timestamp for proximity calculation
-            if 'date' in self.df_events.columns and 'timestamp' not in self.df_events.columns:
-                self.df_events['timestamp'] = self.df_events['date']
-
-            self.df_features = self.macro_data.calculate_temporal_proximity(
-                events_df=self.df_events,
-                price_df=self.df_features,
-            )
-        else:
-            logger.warning(
-                "No macro events available - skipping proximity features")
-            self.df_features["tau_pre"] = 0.0
-            self.df_features["tau_post"] = 0.0
-            self.df_features["weighted_surprise"] = 0.0
-
-        # 2. Fetch FRED Macro Features (REAL historical data)
-        # These capture low-frequency macro regime (Interest Rates, GDP, Inflation)
+        # --- Step 2.3: Macro Features (FRED ONLY) ---
+        # FRED provides real Federal Reserve economic data
+        # Replaces synthetic macro_events dataset
         if HAS_FRED and FREDMacroLoader is not None:
             logger.info(
                 f"Fetching FRED macro features for {self.currency_pair}...")
@@ -286,6 +265,13 @@ class ForexClassifierPipeline:
                 )
 
                 if not fred_macro_df.empty:
+                    # Select only 5 key FRED macro features
+                    key_fred_features = [
+                        'rate_differential', 'vix', 'yield_curve', 'dxy_index', 'oil_price']
+                    selected_cols = [
+                        'date'] + [col for col in key_fred_features if col in fred_macro_df.columns]
+                    fred_macro_df = fred_macro_df[selected_cols]
+
                     # Merge FRED features with price features
                     # Save original index name for restoration
                     original_index_name = self.df_features.index.name or 'date'
@@ -328,8 +314,10 @@ class ForexClassifierPipeline:
                     logger.warning(
                         "No FRED macro data available - adding placeholders")
                     self.df_features["rate_differential"] = 0.0
-                    self.df_features["vix"] = 20.0  # Average VIX
+                    self.df_features["vix"] = 20.0
                     self.df_features["yield_curve"] = 0.0
+                    self.df_features["dxy_index"] = 100.0
+                    self.df_features["oil_price"] = 80.0
             except Exception as e:
                 logger.warning(f"⚠ Failed to fetch FRED macro features: {e}")
                 # Ensure datetime index is preserved even on failure
@@ -338,12 +326,12 @@ class ForexClassifierPipeline:
                         self.df_features['date'] = pd.to_datetime(
                             self.df_features['date'])
                         self.df_features = self.df_features.set_index('date')
-                    else:
-                        logger.error(
-                            "Cannot restore datetime index - 'date' column missing")
+                # Add placeholder columns on error
                 self.df_features["rate_differential"] = 0.0
                 self.df_features["vix"] = 20.0
                 self.df_features["yield_curve"] = 0.0
+                self.df_features["dxy_index"] = 100.0
+                self.df_features["oil_price"] = 80.0
         else:
             # Add placeholder columns if no macro data
             logger.warning(
@@ -351,6 +339,8 @@ class ForexClassifierPipeline:
             self.df_features["rate_differential"] = 0.0
             self.df_features["vix"] = 20.0
             self.df_features["yield_curve"] = 0.0
+            self.df_features["dxy_index"] = 100.0
+            self.df_features["oil_price"] = 80.0
 
         # --- Step 2.4: Sentiment Features ---
         if (self.sentiment_analyzer is not None and

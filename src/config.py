@@ -145,27 +145,26 @@ ENSEMBLE_CONFIG = {
             "num_class": 2,             # Changed from 3 to 2 (Buy/Sell)
         },
         "lstm": {
-            # Architecture - SIMPLIFIED to reduce overfitting
-            "sequence_length": 40,      # 40 bars lookback
-            "hidden_size": 32,          # REDUCED from 64 - less capacity = less memorization
-            "num_layers": 1,            # Keep simple
+            # Architecture - BALANCED for convergence and generalization
+            "sequence_length": 128,     # Increased to 128 for more context (was 40)
+            "hidden_size": 64,          # Increased to 64 for more capacity (was 32)
+            "num_layers": 2,            # Increased to 2 layers (was 1)
             "bidirectional": False,     # Unidirectional
             "hidden_activation": None,  # No activation (LSTM internal)
             
             # CRITICAL: Use Dropout instead of BatchNorm for regularization
-            # BatchNorm alone wasn't preventing overfitting
             "use_batch_norm": False,    # DISABLED - using dropout instead
-            "dropout": 0.4,             # ENABLED - strong dropout to force generalization
+            "dropout": 0.3,             # Moderate dropout (was 0.4)
 
-            # Regularization - AGGRESSIVE to combat severe overfitting
-            "l1_lambda": 1e-5,          # Increased 10x
-            "l2_lambda": 1e-3,          # Increased 10x - strong weight penalty
+            # Regularization - BALANCED to allow learning while preventing overfitting
+            "l1_lambda": 1e-6,          # Reduced from 1e-5
+            "l2_lambda": 1e-4,          # Reduced from 1e-3
 
-            "label_smoothing": 0.15,    # Increased - softer targets
+            "label_smoothing": 0.1,     # Moderate smoothing (was 0.15)
             
-            # Learning rate - REDUCED to slow down memorization
-            "learning_rate": 5e-5,      # Reduced from 1e-4
-            "lr_warmup_epochs": 5,      # Longer warmup
+            # Learning rate - OPTIMIZED for convergence
+            "learning_rate": 1e-4,      # Increased from 5e-5 for faster learning
+            "lr_warmup_epochs": 10,     # Longer warmup (was 5)
             "lr_min_factor": 0.01,      # Min LR = 1% of initial
             
             # Training schedule
