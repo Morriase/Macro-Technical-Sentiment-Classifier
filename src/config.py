@@ -169,17 +169,15 @@ ENSEMBLE_CONFIG = {
 
             "dropout": 0.3,             # Dropout rate (0.3 to prevent spikes)
             "label_smoothing": 0.05,    # Reduced smoothing
-            # Learning rate - increased for learning without activation
-            # NO activation after LSTM → needs stronger initial gradients
-            # Reduced from 5e-4 to 1e-4 to prevent overfitting/divergence
-            # Increased for faster learning (was 1e-4)
-            "learning_rate": 5e-4,      # Reduced from 1e-3 to stabilize training
+            # Learning rate - Optimized for stability per improving_convergence.md
+            # Low LR is critical for financial time series with high variance
+            "learning_rate": 3e-5,      # Reduced to 3e-5 to prevent divergence
             "lr_warmup_epochs": 5,      # Increased warmup for stability
             "lr_min_factor": 0.1,       # Min LR = 10% of initial
             # Training schedule - MQL5: BatchSize=10000, Epochs=500
             "batch_size": 2048,         # Reduced from 10000 for more updates
             "epochs": 200,              # Reduced epochs (faster convergence)
-            "early_stopping_patience": 15,  # MQL5: CEarlyStopping(20, 0.001)
+            "early_stopping_patience": 5,   # Reduced to 5 per resource recommendation
             # Optimizer - keep AdamW (better than Adam for weight decay)
             "optimizer": "adamw",       # Explicitly use AdamW
             "beta1": 0.9,               # Author's value
