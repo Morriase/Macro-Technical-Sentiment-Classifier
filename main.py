@@ -212,45 +212,58 @@ class ForexClassifierPipeline:
 
     def engineer_features(self):
         """
-        Step 2: Engineer all features (technical, macro, sentiment, and multi-timeframe)
+        Step 2: Engineer SIMPLIFIED features (ZigZag approach: 5 features only)
+        
+        Engineer's proven approach: 3 base features + 2 macro features
+        - RSI(12) normalized to [-1, 1]
+        - MACD difference normalized to [-1, 1]
+        - Candlestick body normalized to [-1, 1]
+        - Yield Curve (T10Y2Y)
+        - DXY Index (Dollar strength)
         """
         logger.info("="*60)
-        logger.info("STEP 2: FEATURE ENGINEERING")
+        logger.info("STEP 2: SIMPLIFIED FEATURE ENGINEERING (ZIGZAG APPROACH)")
         logger.info("="*60)
 
         if self.df_price is None:
             raise ValueError("Price data not loaded. Run fetch_data() first.")
 
-        # --- Step 2.1: Base Technical Features on Primary Timeframe ---
-        # OPTIMIZED: ~18 base features (removed redundant Stochastic, BB, CCI, ATR, lags)
-        logger.info(
-            "Calculating OPTIMIZED base technical features on primary timeframe...")
-        self.df_features = self.tech_engineer.calculate_all_features(
-            self.df_price.copy())
-        logger.success(
-            f"✓ Calculated {len(self.df_features.columns)} base features.")
+        import talib
+        
+        # Start with price data
+        self.df_features = self.df_price.copy()
+        
+        logger.info("Calculating 3 base technical features...")
+        
+        # Feature 1: RSI(12) normalized to [-1, 1]
+        self.df_features['rsi_12'] = talib.RSI(self.df_features['close'], timeperiod=12)
+        self.df_features['rsi_norm'] = (self.df_features['rsi_12'] - 50.0) / 50.0
+        
+        # Feature 2: MACD difference (Main - Signal) normalized
+        macd, macd_signal, _ = talib.MACD(
+            self.df_features['close'], 
+            fastperiod=12, 
+            slowperiod=48, 
+            signalperiod=12
+        )
+        macd_diff = np.abs(macd - macd_signal)
+        macd_mean = macd_diff.mean()
+        macd_std = macd_diff.std()
+        self.df_features['macd_diff_norm'] = ((macd_diff - macd_mean) / (macd_std * 3)).clip(-1, 1)
+        
+        # Feature 3: Candlestick body normalized
+        candle_body = self.df_features['close'] - self.df_features['open']
+        body_mean = candle_body.mean()
+        body_std = candle_body.std()
+        self.df_features['candle_body_norm'] = ((candle_body - body_mean) / (body_std * 3)).clip(-1, 1)
+        
+        logger.success("✓ Calculated 3 base features: RSI, MACD_diff, Candle_body")
 
-        # --- Step 2.2: Multi-Timeframe and Regime Features ---
-        if hasattr(self, 'higher_timeframes') and self.higher_timeframes:
-            self.df_features = self.tech_engineer.add_multi_timeframe_features(
-                df_primary=self.df_features,
-                higher_timeframes=self.higher_timeframes
-            )
-        else:
-            logger.warning(
-                "No higher timeframe data available. Skipping MTF feature engineering.")
-
-        # --- Step 2.3: Macro Features (FRED ONLY) ---
-        # FRED provides real Federal Reserve economic data
-        # Replaces synthetic macro_events dataset
+        # --- Macro Features (FRED - Only Yield Curve + DXY) ---
         if HAS_FRED and FREDMacroLoader is not None:
-            logger.info(
-                f"Fetching FRED macro features for {self.currency_pair}...")
+            logger.info(f"Fetching 2 macro features for {self.currency_pair}...")
             try:
-                # Initialize FRED loader
                 fred_loader = FREDMacroLoader()
-
-                # Get date range from price data
                 start_date = self.df_features.index.min()
                 end_date = self.df_features.index.max()
 
@@ -258,225 +271,122 @@ class ForexClassifierPipeline:
                     start_date = start_date.to_pydatetime()
                     end_date = end_date.to_pydatetime()
 
-                # Fetch PAIR-SPECIFIC FRED macro features
-                # (rate differentials, economic indicators for base/quote currencies)
                 fred_macro_df = fred_loader.get_macro_features_for_pair(
                     self.currency_pair, start_date, end_date
                 )
 
                 if not fred_macro_df.empty:
-                    # Select only 5 key FRED macro features
-                    key_fred_features = [
-                        'rate_differential', 'vix', 'yield_curve', 'dxy_index', 'oil_price']
-                    selected_cols = [
-                        'date'] + [col for col in key_fred_features if col in fred_macro_df.columns]
+                    # Select ONLY the 2 best macro features from analysis
+                    key_fred_features = ['yield_curve', 'dxy_index']
+                    selected_cols = ['date'] + [col for col in key_fred_features if col in fred_macro_df.columns]
                     fred_macro_df = fred_macro_df[selected_cols]
 
-                    # Merge FRED features with price features
-                    # Save original index name for restoration
+                    # Merge with price features
                     original_index_name = self.df_features.index.name or 'date'
                     self.df_features = self.df_features.reset_index()
 
-                    # Ensure date column exists and is named correctly
                     if original_index_name != 'date' and original_index_name in self.df_features.columns:
-                        self.df_features = self.df_features.rename(
-                            columns={original_index_name: 'date'})
+                        self.df_features = self.df_features.rename(columns={original_index_name: 'date'})
 
-                    # Ensure date column compatibility (convert to date for merge)
-                    self.df_features['date'] = pd.to_datetime(
-                        self.df_features['date']).dt.date
-                    fred_macro_df['date'] = pd.to_datetime(
-                        fred_macro_df['date']).dt.date
+                    self.df_features['date'] = pd.to_datetime(self.df_features['date']).dt.date
+                    fred_macro_df['date'] = pd.to_datetime(fred_macro_df['date']).dt.date
 
-                    self.df_features = pd.merge(
-                        self.df_features,
-                        fred_macro_df,
-                        on='date',
-                        how='left'
-                    )
+                    self.df_features = pd.merge(self.df_features, fred_macro_df, on='date', how='left')
 
-                    # Forward-fill macro features (they don't change daily)
-                    macro_cols = [
-                        col for col in fred_macro_df.columns if col != 'date']
+                    # Forward-fill macro features
+                    macro_cols = [col for col in fred_macro_df.columns if col != 'date']
                     for col in macro_cols:
                         if col in self.df_features.columns:
-                            self.df_features[col] = self.df_features[col].ffill().fillna(
-                                0)
+                            self.df_features[col] = self.df_features[col].ffill().fillna(0)
 
                     # Restore datetime index
-                    self.df_features['date'] = pd.to_datetime(
-                        self.df_features['date'])
+                    self.df_features['date'] = pd.to_datetime(self.df_features['date'])
                     self.df_features = self.df_features.set_index('date')
 
-                    logger.success(
-                        f"✓ Added {len(macro_cols)} FRED macro features for {self.currency_pair}")
+                    logger.success(f"✓ Added 2 macro features: {', '.join(macro_cols)}")
                 else:
-                    logger.warning(
-                        "No FRED macro data available - adding placeholders")
-                    self.df_features["rate_differential"] = 0.0
-                    self.df_features["vix"] = 20.0
+                    logger.warning("No FRED macro data - adding placeholders")
                     self.df_features["yield_curve"] = 0.0
                     self.df_features["dxy_index"] = 100.0
-                    self.df_features["oil_price"] = 80.0
             except Exception as e:
                 logger.warning(f"⚠ Failed to fetch FRED macro features: {e}")
-                # Ensure datetime index is preserved even on failure
                 if not isinstance(self.df_features.index, pd.DatetimeIndex):
                     if 'date' in self.df_features.columns:
-                        self.df_features['date'] = pd.to_datetime(
-                            self.df_features['date'])
+                        self.df_features['date'] = pd.to_datetime(self.df_features['date'])
                         self.df_features = self.df_features.set_index('date')
-                # Add placeholder columns on error
-                self.df_features["rate_differential"] = 0.0
-                self.df_features["vix"] = 20.0
                 self.df_features["yield_curve"] = 0.0
                 self.df_features["dxy_index"] = 100.0
-                self.df_features["oil_price"] = 80.0
         else:
-            # Add placeholder columns if no macro data
-            logger.warning(
-                "No FRED macro source available - using placeholders")
-            self.df_features["rate_differential"] = 0.0
-            self.df_features["vix"] = 20.0
+            logger.warning("No FRED macro source - using placeholders")
             self.df_features["yield_curve"] = 0.0
             self.df_features["dxy_index"] = 100.0
-            self.df_features["oil_price"] = 80.0
-
-        # --- Step 2.4: Sentiment Features ---
-        if (self.sentiment_analyzer is not None and
-                self.sentiment_analyzer.sentiment_pipeline is not None and
-                self.df_news is not None and not self.df_news.empty):
-            logger.info(
-                f"Calculating PAIR-SPECIFIC sentiment features for {self.currency_pair}...")
-            try:
-                # CRITICAL FIX: Pass currency_pair to filter headlines
-                # This ensures training sentiment matches inference sentiment
-                # Previously: all 121K headlines → diluted signal
-                # Now: ~15K pair-relevant headlines → focused signal
-                daily_sentiment = self.sentiment_analyzer.aggregate_daily_sentiment(
-                    self.df_news,
-                    text_col='text',  # news_loader standardizes to 'text' column
-                    currency_pair=self.currency_pair  # Filter to pair-specific headlines
-                )
-                time_weighted_sentiment = self.sentiment_analyzer.calculate_time_weighted_sentiment(
-                    daily_sentiment)
-
-                self.df_features = self.df_features.reset_index()
-                self.df_features = pd.merge(
-                    self.df_features,
-                    time_weighted_sentiment,
-                    left_on="date",
-                    right_on="date",
-                    how="left"
-                )
-                sentiment_cols = [
-                    col for col in time_weighted_sentiment.columns if col != "date"]
-                for col in sentiment_cols:
-                    self.df_features[col] = self.df_features[col].fillna(0.0)
-                self.df_features = self.df_features.set_index("date")
-                logger.success("✓ Sentiment features calculated and merged.")
-            except Exception as e:
-                logger.warning(
-                    f"⚠ Failed to calculate sentiment features: {e}")
 
         # --- Final Cleanup ---
         initial_len = len(self.df_features)
         self.df_features.dropna(inplace=True)
-        logger.info(
-            f"Dropped {initial_len - len(self.df_features)} rows with NaNs after feature engineering.")
-        logger.info(
-            f"✓ {len(self.df_features.columns)} total features created, {len(self.df_features)} samples ready.")
+        dropped = initial_len - len(self.df_features)
+        
+        logger.info(f"Dropped {dropped} rows with NaNs after feature engineering")
+        logger.success(f"✓ SIMPLIFIED FEATURES READY: 5 features, {len(self.df_features):,} samples")
+        logger.info(f"  Features: rsi_norm, macd_diff_norm, candle_body_norm, yield_curve, dxy_index")
 
     def create_target(
         self,
         forward_window_hours: int = 24,
-        min_move_pips: float = None,  # If None, use ATR-based threshold
-        atr_multiplier: float = 0.5,  # ATR multiplier for adaptive threshold
+        min_move_pips: float = None,  # Not used in ZigZag approach
+        atr_multiplier: float = 0.5,  # Not used in ZigZag approach
     ):
         """
-        Step 3: Create target variable with ATR-based adaptive thresholds
-
+        Step 3: Create ZigZag-based target (direction + magnitude to next extremum)
+        
+        This replaces the old binary up/down target with a more meaningful target:
+        predicting the direction and magnitude to the next significant price reversal.
+        
         Args:
-            forward_window_hours: Hours ahead to look for movement
-            min_move_pips: Fixed pips threshold (if None, uses ATR-based)
-            atr_multiplier: Multiplier for ATR-based threshold (default 0.5x ATR)
+            forward_window_hours: Not used (kept for compatibility)
+            min_move_pips: Not used (ZigZag automatically filters noise)
+            atr_multiplier: Not used (ZigZag uses depth/backstep instead)
         """
         logger.info("="*60)
-        logger.info("STEP 3: TARGET CREATION")
+        logger.info("STEP 3: ZIGZAG TARGET CREATION")
         logger.info("="*60)
 
         if self.df_features is None:
             raise ValueError(
                 "Features not engineered. Run engineer_features() first.")
 
-        # Calculate forward return
-        bars_ahead = forward_window_hours // 4  # 4H bars
-        self.df_features["forward_close"] = self.df_features["close"].shift(
-            -bars_ahead)
-        self.df_features["forward_return"] = (
-            self.df_features["forward_close"] - self.df_features["close"]
+        # Import ZigZag utilities
+        from src.utils.zigzag import calculate_zigzag_extrema, create_zigzag_targets, validate_zigzag_quality
+        from src.config import ZIGZAG_CONFIG
+
+        # Calculate ZigZag extrema
+        logger.info(f"Calculating ZigZag extrema (depth={ZIGZAG_CONFIG['depth']}, backstep={ZIGZAG_CONFIG['backstep']})...")
+        self.df_features = calculate_zigzag_extrema(
+            self.df_features,
+            depth=ZIGZAG_CONFIG["depth"],
+            deviation=ZIGZAG_CONFIG["deviation"],
+            backstep=ZIGZAG_CONFIG["backstep"]
         )
 
-        # Convert to pips (dynamic based on currency pair)
+        # Create dual targets (direction + magnitude)
         is_jpy_pair = "JPY" in self.currency_pair
         pip_multiplier = 100 if is_jpy_pair else 10000
-        logger.info(
-            f"Using pip multiplier for {self.currency_pair}: {pip_multiplier}")
+        logger.info(f"Using pip multiplier for {self.currency_pair}: {pip_multiplier}")
 
-        self.df_features["forward_return_pips"] = (
-            self.df_features["forward_return"] * pip_multiplier
-        )
+        self.df_features = create_zigzag_targets(self.df_features, pip_multiplier=pip_multiplier)
 
-        # Determine threshold: fixed pips or ATR-based
-        # REDESIGN: Binary Classification (Buy/Sell only)
-        # User requirement: "redesign to only predict buy or sell"
-        # We split simply at 0: > 0 is Buy (1), <= 0 is Sell (0)
+        # Map to sklearn-compatible target_class (for compatibility with existing code)
+        self.df_features["target_class"] = self.df_features["target_direction"].astype(int)
+        self.df_features["target"] = self.df_features["target_direction"].astype(int)
 
-        logger.info("Creating BINARY target (Buy/Sell) - removing Hold class")
-
-        # Binary target: 1 (Buy) if return > 0, else 0 (Sell)
-        self.df_features["target"] = np.where(
-            self.df_features["forward_return"] > 0, 1, 0
-        )
-
-        # Target class is same as target (0 or 1)
-        self.df_features["target_class"] = self.df_features["target"].astype(
-            int)
-
-        # CRITICAL FIX: DO NOT FILTER ROWS - This breaks LSTM temporal learning!
-        # Senior MLOps Engineer: "You cannot filter rows before feeding them to an LSTM.
-        # An LSTM learns temporal transitions (t1 → t2 → t3). If you filter out 73% of
-        # small moves, you are feeding the LSTM disjointed time jumps (e.g., Monday 10:00 AM,
-        # then the next row is Tuesday 2:00 PM). It cannot learn market physics from broken time."
-        #
-        # SOLUTION: Keep ALL data continuous. Use class_weights (already implemented in
-        # lstm_model.py) to de-prioritize small moves instead of deleting them.
-        # This allows LSTM to learn regime transitions (low volatility → breakout patterns).
-
-        if min_move_pips is not None and min_move_pips > 0:
-            # Log what we WOULD have filtered, but DON'T actually filter
-            abs_return_pips = self.df_features["forward_return_pips"].abs()
-            would_filter = (abs_return_pips < min_move_pips).sum()
-            total = len(self.df_features)
-            logger.info(
-                f"⚠ Data Continuity Mode: Keeping ALL {total} samples (would have filtered {would_filter} = {would_filter/total*100:.1f}%)")
-            logger.info(
-                f"  → Small moves kept for LSTM temporal learning (class_weights handle imbalance)")
-        else:
-            logger.info(
-                f"✓ Data Continuity Mode: Keeping ALL {len(self.df_features)} samples for LSTM temporal learning")
-
-        # Drop future data
-        self.df_features.dropna(subset=["forward_close"], inplace=True)
-
-        # Class distribution
-        class_counts = self.df_features["target_class"].value_counts(
-        ).sort_index()
-        logger.info("Target class distribution (Binary - Filtered):")
-        for cls, count in class_counts.items():
-            class_name = ["Sell", "Buy"][cls]
-            pct = count / len(self.df_features) * 100
-            logger.info(f"  {class_name} ({cls}): {count} ({pct:.1f}%)")
+        # Validate ZigZag quality
+        logger.info("\nValidating ZigZag target quality...")
+        is_valid = validate_zigzag_quality(self.df_features, min_correlation=0.20)
+        
+        if not is_valid:
+            logger.warning("⚠ ZigZag quality below threshold - consider adjusting parameters")
+        
+        logger.success(f"✓ ZigZag targets created: {len(self.df_features):,} samples ready")
         return
 
         # --- LEGACY 3-CLASS LOGIC (DISABLED) ---
@@ -562,18 +472,23 @@ class ForexClassifierPipeline:
         if self.df_features is None or "target_class" not in self.df_features.columns:
             raise ValueError("Target not created. Run create_target() first.")
 
-        # Define feature columns (exclude target and derived columns)
-        exclude_cols = [
-            "open", "high", "low", "close", "volume",
-            "forward_close", "forward_return", "forward_return_pips",
-            "target", "target_class", "date"  # Exclude 'date' column from sentiment merge
-        ]
+        # Define feature columns - ZIGZAG APPROACH: 5 features only
+        # 3 base features + 2 macro features (proven by analysis)
         feature_cols = [
-            col for col in self.df_features.columns
-            if col not in exclude_cols
+            'rsi_norm',
+            'macd_diff_norm',
+            'candle_body_norm',
+            'yield_curve',
+            'dxy_index'
         ]
+        
+        # Verify all features exist
+        missing_features = [col for col in feature_cols if col not in self.df_features.columns]
+        if missing_features:
+            raise ValueError(f"Missing required features: {missing_features}")
 
-        logger.info(f"Using {len(feature_cols)} features for training")
+        logger.info(f"Using {len(feature_cols)} SIMPLIFIED features for training (ZigZag approach)")
+        logger.info(f"  Features: {', '.join(feature_cols)}")
 
         if use_walk_forward:
             # Walk-Forward Optimization
@@ -657,15 +572,13 @@ class ForexClassifierPipeline:
         if self.model is None:
             raise ValueError("Model not trained. Run train_model() first.")
 
-        # Get feature columns
-        exclude_cols = [
-            "open", "high", "low", "close", "volume",
-            "forward_close", "forward_return", "forward_return_pips",
-            "target", "target_class"
-        ]
+        # Get feature columns - ZIGZAG APPROACH: 5 features only
         feature_cols = [
-            col for col in self.df_features.columns
-            if col not in exclude_cols
+            'rsi_norm',
+            'macd_diff_norm',
+            'candle_body_norm',
+            'yield_curve',
+            'dxy_index'
         ]
 
         # Predict on most recent data (last 100 bars)

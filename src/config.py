@@ -145,24 +145,27 @@ ENSEMBLE_CONFIG = {
             "num_class": 2,             # Changed from 3 to 2 (Buy/Sell)
         },
         "lstm": {
-            # Architecture - EXTENDED HORIZON for better pattern recognition
-            # FIX: 30 steps × 5min = 2.5 hours is too short for macro-technical patterns
-            # NEW: 100 steps × 5min = 8.3 hours (matches forward_window prediction horizon)
-            "sequence_length": 100,     # CRITICAL FIX: Extended from 30 to 100
-            "hidden_size": 48,          # Smaller - prevents memorization
+            # Architecture - ZIGZAG APPROACH (Engineer's proven settings)
+            # Engineer used: 40 units, 40 sequence length → 65% accuracy
+            "sequence_length": 40,      # ZIGZAG: 40 bars (3.3 hours on M5)
+            "hidden_size": 40,          # ZIGZAG: Match sequence length
             "num_layers": 1,            # Single layer - simpler = better generalization
             "bidirectional": False,
             "hidden_activation": None,  # NO activation - LSTM gates provide non-linearity
 
-            # Regularization - AGGRESSIVE to prevent overfitting
+            # Dual Output - ZIGZAG APPROACH
+            "num_outputs": 2,           # Direction (classification) + Magnitude (regression)
+            "output_types": ["classification", "regression"],
+
+            # Regularization - MAXIMUM to prevent overfitting
             "use_batch_norm": True,     # ENABLED - stabilizes training
-            "dropout": 0.3,             # INCREASED - strong regularization needed
+            "dropout": 0.5,             # MAXIMUM - very strong regularization
 
-            # Weight regularization - STRONGER
-            "l1_lambda": 1e-5,          # Increased L1 for sparsity
-            "l2_lambda": 1e-2,          # 10x stronger L2 to prevent overfitting
+            # Weight regularization - MAXIMUM
+            "l1_lambda": 1e-4,          # 10x stronger L1 for sparsity
+            "l2_lambda": 5e-2,          # 5x stronger L2 to prevent overfitting
 
-            "label_smoothing": 0.1,     # Increased - forex is noisy
+            "label_smoothing": 0.15,    # Increased - forex is very noisy
 
             # Learning rate - LOWER for more stable learning
             "learning_rate": 5e-5,      # Reduced from 1e-4
@@ -180,8 +183,8 @@ ENSEMBLE_CONFIG = {
             "beta2": 0.999,
             "max_grad_norm": 0.5,       # Tighter gradient clipping
 
-            # Classification
-            "num_classes": 2,
+            # Classification (direction only - magnitude is regression)
+            "num_classes": 2,           # Buy (1) or Sell (0)
             "gradient_accumulation_steps": 1,
         },
     },
@@ -318,15 +321,22 @@ IMBALANCE_CONFIG = {
     "target_threshold_atr": 1.0,  # Min ATR move to classify as Buy/Sell
 }
 
+# ZigZag Configuration (Senior Engineer's Approach)
+# Identifies significant price reversals for target creation
+ZIGZAG_CONFIG = {
+    "depth": 48,        # 4 hours on M5 (48 bars × 5 min)
+    "deviation": 1,     # 1 point minimum (not used in simple implementation)
+    "backstep": 47,     # Minimum bars between extrema (prevents oscillation)
+}
+
 # Target Variable Configuration
 TARGET_CONFIG = {
-    # "ternary" (Buy/Sell/Hold) or "binary" (Up/Down)
-    "classification_type": "binary",
-    # REDUCED from 24h to 8h per expert: shorter horizons more predictable from M5 data
-    "forward_window_hours": 8,
-    # CRITICAL FIX: Set to 0.0 to keep ALL data continuous
-    # Filtering 73% of rows breaks LSTM's temporal learning (jumps in time)
-    # Instead, use class_weights to de-prioritize small moves
+    # ZIGZAG APPROACH: Predict direction + magnitude to next extremum
+    "type": "zigzag_extremum",  # NEW: ZigZag-based (not binary up/down)
+    "dual_output": True,         # Direction (classification) + Magnitude (regression)
+    "classification_type": "binary",  # Direction: Buy (1) or Sell (0)
+    "forward_window_hours": 8,   # Keep for reference (not used in ZigZag)
+    # ZigZag automatically filters noise - no need for min_move_threshold
     "min_move_threshold_pips": 0.0,
-    "atr_multiplier": 0.6,  # Only used if min_move_threshold_pips is None
+    "atr_multiplier": 0.6,  # Not used in ZigZag approach
 }

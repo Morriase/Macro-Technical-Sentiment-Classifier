@@ -28,18 +28,22 @@ class LazySequenceDataset(Dataset):
     """
     Zero-copy dataset that slices sequences on-the-fly.
     Keeps data in 2D to save 40x RAM.
+    
+    ZIGZAG UPDATE: Supports dual targets (direction + magnitude)
 
     RAM Math:
-    - 2D Array: 2M rows × 33 features × 4 bytes = 0.26 GB
-    - 3D Array: 2M rows × 40 seq × 33 features × 4 bytes = 10.5 GB
+    - 2D Array: 2M rows × 5 features × 4 bytes = 0.04 GB (was 0.26 GB with 33 features)
+    - 3D Array: 2M rows × 40 seq × 5 features × 4 bytes = 1.6 GB (was 10.5 GB)
     - This class keeps data 2D and only creates 3D windows per batch
     """
 
-    def __init__(self, X: np.ndarray, y: np.ndarray, sequence_length: int):
+    def __init__(self, X: np.ndarray, y_direction: np.ndarray, y_magnitude: np.ndarray = None, sequence_length: int = 40):
         # Store as float32 to save 50% RAM compared to float64
         self.X = torch.tensor(X.astype(np.float32), dtype=torch.float32)
-        self.y = torch.tensor(y, dtype=torch.long) if y is not None else None
+        self.y_direction = torch.tensor(y_direction, dtype=torch.long) if y_direction is not None else None
+        self.y_magnitude = torch.tensor(y_magnitude.astype(np.float32), dtype=torch.float32) if y_magnitude is not None else None
         self.seq_len = sequence_length
+        self.dual_output = y_magnitude is not None
 
     def __len__(self):
         return len(self.X) - self.seq_len
@@ -48,29 +52,42 @@ class LazySequenceDataset(Dataset):
         # Create 3D view only for this specific item
         # idx -> [idx, idx+seq_len]
         x_window = self.X[idx: idx + self.seq_len]
-        if self.y is not None:
-            # Target is the label at the END of the sequence
-            y_label = self.y[idx + self.seq_len - 1]
-            return x_window, y_label
+        
+        if self.y_direction is not None:
+            # Targets are at the END of the sequence
+            y_dir = self.y_direction[idx + self.seq_len - 1]
+            
+            if self.dual_output:
+                y_mag = self.y_magnitude[idx + self.seq_len - 1]
+                return x_window, y_dir, y_mag
+            else:
+                return x_window, y_dir
+        
         return x_window
 
 
 class LSTMSequenceClassifier(nn.Module):
     """
-    Deep LSTM network for sequence classification
+    Deep LSTM network for sequence classification with DUAL OUTPUT
+    
+    ZIGZAG APPROACH:
+    - Output 1: Direction (classification) - Buy (1) or Sell (0)
+    - Output 2: Magnitude (regression) - Distance to next extremum
+    
     Captures temporal dependencies in financial time series
     """
 
     def __init__(
         self,
         input_size: int,
-        hidden_size: int = 64,
+        hidden_size: int = 40,
         num_layers: int = 1,
         num_classes: int = 2,
         dropout: float = 0.3,
         bidirectional: bool = False,
         use_batch_norm: bool = True,
         hidden_activation: str = None,
+        dual_output: bool = True,  # ZIGZAG: Enable dual output
     ):
         super(LSTMSequenceClassifier, self).__init__()
 
@@ -80,6 +97,7 @@ class LSTMSequenceClassifier(nn.Module):
         self.num_classes = num_classes
         self.bidirectional = bidirectional
         self.use_batch_norm = use_batch_norm
+        self.dual_output = dual_output
 
         # 1. Input BatchNorm - stabilizes training
         if use_batch_norm:
@@ -100,14 +118,28 @@ class LSTMSequenceClassifier(nn.Module):
         if use_batch_norm:
             self.lstm_bn = nn.BatchNorm1d(fc_input_size)
 
-        # 4. Dropout & Output Head
+        # 4. Dropout
         self.dropout = nn.Dropout(dropout)
-        self.fc = nn.Linear(fc_input_size, num_classes)
+        
+        # 5. DUAL OUTPUT HEADS (ZIGZAG APPROACH)
+        if dual_output:
+            # Head 1: Direction (classification)
+            self.direction_head = nn.Linear(fc_input_size, num_classes)
+            # Head 2: Magnitude (regression)
+            self.magnitude_head = nn.Linear(fc_input_size, 1)
+        else:
+            # Single output (backward compatibility)
+            self.fc = nn.Linear(fc_input_size, num_classes)
+        
         self.softmax = nn.Softmax(dim=1)
 
     def forward(self, x, return_hidden=False):
         """
-        Forward pass: Input → BatchNorm → LSTM → BatchNorm → Dropout → FC → Logits
+        Forward pass: Input → BatchNorm → LSTM → BatchNorm → Dropout → Dual Heads
+        
+        ZIGZAG APPROACH:
+        Returns (direction_logits, magnitude_pred) if dual_output=True
+        Returns direction_logits only if dual_output=False
 
         Args:
             x: Input tensor of shape (batch_size, sequence_length, input_size)
@@ -134,19 +166,33 @@ class LSTMSequenceClassifier(nn.Module):
         if self.use_batch_norm:
             hidden = self.lstm_bn(hidden)
 
-        # Dropout & FC
+        # Dropout
         hidden = self.dropout(hidden)
-        logits = self.fc(hidden)
-
-        if return_hidden:
-            return logits, hidden
-        return logits
+        
+        # DUAL OUTPUT (ZIGZAG APPROACH)
+        if self.dual_output:
+            direction_logits = self.direction_head(hidden)
+            magnitude_pred = self.magnitude_head(hidden).squeeze(-1)  # Remove last dim
+            
+            if return_hidden:
+                return direction_logits, magnitude_pred, hidden
+            return direction_logits, magnitude_pred
+        else:
+            # Single output (backward compatibility)
+            logits = self.fc(hidden)
+            if return_hidden:
+                return logits, hidden
+            return logits
 
     def predict_proba(self, x):
-        """Predict class probabilities"""
+        """Predict class probabilities (direction only)"""
         with torch.no_grad():
-            logits = self.forward(x)
-            probs = self.softmax(logits)
+            if self.dual_output:
+                direction_logits, _ = self.forward(x)
+                probs = self.softmax(direction_logits)
+            else:
+                logits = self.forward(x)
+                probs = self.softmax(logits)
         return probs
 
 
@@ -213,6 +259,9 @@ class LSTMSequenceModel:
         # Device
         self.device = torch.device(device if device else DEVICE)
 
+        # ZIGZAG: Check if dual output is enabled in config
+        self.dual_output = ENSEMBLE_CONFIG.get('base_learners', {}).get('lstm', {}).get('num_outputs', 1) == 2
+        
         # Initialize model
         self.model = LSTMSequenceClassifier(
             input_size=input_size,
@@ -222,6 +271,7 @@ class LSTMSequenceModel:
             dropout=dropout,
             bidirectional=bidirectional,
             use_batch_norm=use_batch_norm,
+            dual_output=self.dual_output,  # ZIGZAG: Enable dual output
         ).to(self.device)
 
         # Multi-GPU Support
@@ -254,19 +304,36 @@ class LSTMSequenceModel:
         self,
         X: np.ndarray,
         y: np.ndarray,
+        y_magnitude: Optional[np.ndarray] = None,  # ZIGZAG: Magnitude target
         X_val: Optional[np.ndarray] = None,
         y_val: Optional[np.ndarray] = None,
+        y_val_magnitude: Optional[np.ndarray] = None,  # ZIGZAG: Val magnitude
         save_plots_path: Optional[str] = None,
     ):
         """
         Train LSTM model with TRUE LAZY LOADING (no 3D array creation).
+        
+        ZIGZAG UPDATE: Supports dual targets (direction + magnitude)
+        
+        Args:
+            X: Features (2D array)
+            y: Direction target (1D array) - Buy (1) or Sell (0)
+            y_magnitude: Magnitude target (1D array) - Distance to extremum (optional)
+            X_val: Validation features
+            y_val: Validation direction target
+            y_val_magnitude: Validation magnitude target (optional)
+            save_plots_path: Path to save training plots
         """
         # 1. Scale Data (convert to float32 to save RAM)
         X = X.astype(np.float32)
         X_scaled = self.scaler.fit_transform(X)
 
         # 2. Create Lazy Datasets (NO 3D Array Creation!)
-        train_dataset = LazySequenceDataset(X_scaled, y, self.sequence_length)
+        # ZIGZAG: Pass magnitude target if available
+        if self.dual_output and y_magnitude is not None:
+            train_dataset = LazySequenceDataset(X_scaled, y, y_magnitude, self.sequence_length)
+        else:
+            train_dataset = LazySequenceDataset(X_scaled, y, None, self.sequence_length)
 
         # Free original arrays
         del X_scaled
@@ -297,8 +364,13 @@ class LSTMSequenceModel:
         if X_val is not None and y_val is not None:
             X_val = X_val.astype(np.float32)
             X_val_scaled = self.scaler.transform(X_val)
-            val_dataset = LazySequenceDataset(
-                X_val_scaled, y_val, self.sequence_length)
+            
+            # ZIGZAG: Pass magnitude target if available
+            if self.dual_output and y_val_magnitude is not None:
+                val_dataset = LazySequenceDataset(X_val_scaled, y_val, y_val_magnitude, self.sequence_length)
+            else:
+                val_dataset = LazySequenceDataset(X_val_scaled, y_val, None, self.sequence_length)
+            
             val_loader = DataLoader(
                 val_dataset,
                 # Larger batch for validation (no gradients)
@@ -327,8 +399,11 @@ class LSTMSequenceModel:
             f"Using dynamic class weights: {class_weights.cpu().numpy()}")
 
         # 4. Loss & Optimizer
-        criterion = nn.CrossEntropyLoss(
+        # ZIGZAG: Dual loss functions
+        criterion_direction = nn.CrossEntropyLoss(
             weight=class_weights, label_smoothing=self.label_smoothing)
+        criterion_magnitude = nn.MSELoss() if self.dual_output else None
+        
         optimizer = optim.AdamW(
             self.model.parameters(),
             lr=self.learning_rate,
@@ -356,20 +431,38 @@ class LSTMSequenceModel:
             train_correct = 0
             train_total = 0
 
-            for batch_idx, (batch_X, batch_y) in enumerate(train_loader):
-                batch_X = batch_X.to(self.device, non_blocking=True)
-                batch_y = batch_y.to(self.device, non_blocking=True)
+            for batch_idx, batch_data in enumerate(train_loader):
+                # ZIGZAG: Unpack dual targets if available
+                if self.dual_output and len(batch_data) == 3:
+                    batch_X, batch_y_dir, batch_y_mag = batch_data
+                    batch_X = batch_X.to(self.device, non_blocking=True)
+                    batch_y_dir = batch_y_dir.to(self.device, non_blocking=True)
+                    batch_y_mag = batch_y_mag.to(self.device, non_blocking=True)
+                else:
+                    batch_X, batch_y_dir = batch_data
+                    batch_X = batch_X.to(self.device, non_blocking=True)
+                    batch_y_dir = batch_y_dir.to(self.device, non_blocking=True)
+                    batch_y_mag = None
 
                 optimizer.zero_grad()
 
                 # Forward pass (with optional AMP)
                 if self.use_amp and self.scaler_amp:
                     with autocast('cuda'):
-                        outputs = self.model(batch_X)
-                        loss = criterion(outputs, batch_y)
+                        if self.dual_output:
+                            dir_logits, mag_pred = self.model(batch_X)
+                            loss_dir = criterion_direction(dir_logits, batch_y_dir)
+                            if batch_y_mag is not None:
+                                loss_mag = criterion_magnitude(mag_pred, batch_y_mag)
+                                loss = loss_dir + 0.5 * loss_mag  # Weight magnitude less
+                            else:
+                                loss = loss_dir
+                        else:
+                            outputs = self.model(batch_X)
+                            loss = criterion_direction(outputs, batch_y_dir)
+                        
                         if self.l1_lambda > 0:
-                            l1_penalty = sum(p.abs().sum()
-                                             for p in self.model.parameters())
+                            l1_penalty = sum(p.abs().sum() for p in self.model.parameters())
                             loss = loss + self.l1_lambda * l1_penalty
 
                     self.scaler_amp.scale(loss).backward()
@@ -379,11 +472,20 @@ class LSTMSequenceModel:
                     self.scaler_amp.step(optimizer)
                     self.scaler_amp.update()
                 else:
-                    outputs = self.model(batch_X)
-                    loss = criterion(outputs, batch_y)
+                    if self.dual_output:
+                        dir_logits, mag_pred = self.model(batch_X)
+                        loss_dir = criterion_direction(dir_logits, batch_y_dir)
+                        if batch_y_mag is not None:
+                            loss_mag = criterion_magnitude(mag_pred, batch_y_mag)
+                            loss = loss_dir + 0.5 * loss_mag  # Weight magnitude less
+                        else:
+                            loss = loss_dir
+                    else:
+                        outputs = self.model(batch_X)
+                        loss = criterion_direction(outputs, batch_y_dir)
+                    
                     if self.l1_lambda > 0:
-                        l1_penalty = sum(p.abs().sum()
-                                         for p in self.model.parameters())
+                        l1_penalty = sum(p.abs().sum() for p in self.model.parameters())
                         loss = loss + self.l1_lambda * l1_penalty
 
                     loss.backward()
@@ -393,11 +495,14 @@ class LSTMSequenceModel:
 
                 total_loss += loss.item()
 
-                # Training accuracy
+                # Training accuracy (direction only)
                 with torch.no_grad():
-                    preds = torch.argmax(outputs, dim=1)
-                    train_correct += (preds == batch_y).sum().item()
-                    train_total += batch_y.size(0)
+                    if self.dual_output:
+                        preds = torch.argmax(dir_logits, dim=1)
+                    else:
+                        preds = torch.argmax(outputs, dim=1)
+                    train_correct += (preds == batch_y_dir).sum().item()
+                    train_total += batch_y_dir.size(0)
 
             avg_train_loss = total_loss / len(train_loader)
             train_acc = train_correct / train_total if train_total > 0 else 0.0
@@ -414,15 +519,36 @@ class LSTMSequenceModel:
                 val_total = 0
 
                 with torch.no_grad():
-                    for batch_X, batch_y in val_loader:
-                        batch_X = batch_X.to(self.device, non_blocking=True)
-                        batch_y = batch_y.to(self.device, non_blocking=True)
-                        outputs = self.model(batch_X)
-                        loss = criterion(outputs, batch_y)
+                    for batch_data in val_loader:
+                        # ZIGZAG: Unpack dual targets if available
+                        if self.dual_output and len(batch_data) == 3:
+                            batch_X, batch_y_dir, batch_y_mag = batch_data
+                            batch_X = batch_X.to(self.device, non_blocking=True)
+                            batch_y_dir = batch_y_dir.to(self.device, non_blocking=True)
+                            batch_y_mag = batch_y_mag.to(self.device, non_blocking=True)
+                        else:
+                            batch_X, batch_y_dir = batch_data
+                            batch_X = batch_X.to(self.device, non_blocking=True)
+                            batch_y_dir = batch_y_dir.to(self.device, non_blocking=True)
+                            batch_y_mag = None
+                        
+                        if self.dual_output:
+                            dir_logits, mag_pred = self.model(batch_X)
+                            loss_dir = criterion_direction(dir_logits, batch_y_dir)
+                            if batch_y_mag is not None:
+                                loss_mag = criterion_magnitude(mag_pred, batch_y_mag)
+                                loss = loss_dir + 0.5 * loss_mag
+                            else:
+                                loss = loss_dir
+                            preds = torch.argmax(dir_logits, dim=1)
+                        else:
+                            outputs = self.model(batch_X)
+                            loss = criterion_direction(outputs, batch_y_dir)
+                            preds = torch.argmax(outputs, dim=1)
+                        
                         val_loss += loss.item()
-                        preds = torch.argmax(outputs, dim=1)
-                        val_correct += (preds == batch_y).sum().item()
-                        val_total += batch_y.size(0)
+                        val_correct += (preds == batch_y_dir).sum().item()
+                        val_total += batch_y_dir.size(0)
 
                 avg_val_loss = val_loss / len(val_loader)
                 val_acc = val_correct / val_total

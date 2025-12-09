@@ -318,20 +318,29 @@ class HybridEnsemble:
         self,
         X: np.ndarray,
         y: np.ndarray,
+        y_magnitude: Optional[np.ndarray] = None,  # ZIGZAG: Magnitude target
         X_val: Optional[np.ndarray] = None,
         y_val: Optional[np.ndarray] = None,
+        y_val_magnitude: Optional[np.ndarray] = None,  # ZIGZAG: Val magnitude
         save_plots_path: Optional[str] = None,
         feature_names: Optional[List[str]] = None,
         use_walk_forward: bool = False,
     ):
         """
-        Train the hybrid ensemble
+        Train the hybrid ensemble with ZIGZAG dual target support
+        
+        ZIGZAG UPDATE: Supports dual targets (direction + magnitude)
+        - XGBoost uses direction only (classification)
+        - LSTM uses both direction and magnitude (dual output)
+        - Meta-learner uses direction only
 
         Args:
             X: Training features
-            y: Training labels
+            y: Training direction labels (Buy=1, Sell=0)
+            y_magnitude: Training magnitude targets (distance to extremum) - ZIGZAG
             X_val: Validation features (optional)
-            y_val: Validation labels (optional)
+            y_val: Validation direction labels (optional)
+            y_val_magnitude: Validation magnitude targets (optional) - ZIGZAG
             save_plots_path: Path prefix for saving training plots (optional)
             feature_names: List of feature column names (CRITICAL for inference alignment)
             use_walk_forward: Whether to use walk-forward optimization (should only be True from main pipeline)
@@ -391,7 +400,13 @@ class HybridEnsemble:
             self.lstm_base = LSTMSequenceModel(
                 input_size=X_scaled.shape[1], **self.lstm_params
             )
-            self.lstm_base.fit(X_scaled, y, save_plots_path=save_plots_path)
+            # ZIGZAG: Pass magnitude target if available
+            if y_magnitude is not None:
+                logger.info("  → Using ZIGZAG dual output (direction + magnitude)")
+                self.lstm_base.fit(X_scaled, y, y_magnitude=y_magnitude, save_plots_path=save_plots_path)
+            else:
+                logger.info("  → Using single output (direction only)")
+                self.lstm_base.fit(X_scaled, y, save_plots_path=save_plots_path)
             meta_features = np.hstack([xgb_oof_proba, lstm_oof_proba])
         else:
             logger.info("Skipping LSTM (USE_LSTM=False or BASELINE_MODE=True)")
