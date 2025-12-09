@@ -375,6 +375,13 @@ class ForexClassifierPipeline:
 
         self.df_features = create_zigzag_targets(self.df_features, pip_multiplier=pip_multiplier)
 
+        # Drop rows with NaN targets (end of data where no next extremum exists)
+        initial_len = len(self.df_features)
+        self.df_features = self.df_features.dropna(subset=['target_direction'])
+        dropped = initial_len - len(self.df_features)
+        if dropped > 0:
+            logger.info(f"Dropped {dropped} rows with NaN targets (end of data)")
+
         # Map to sklearn-compatible target_class (for compatibility with existing code)
         self.df_features["target_class"] = self.df_features["target_direction"].astype(int)
         self.df_features["target"] = self.df_features["target_direction"].astype(int)
