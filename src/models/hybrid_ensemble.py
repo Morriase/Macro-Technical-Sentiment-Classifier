@@ -463,41 +463,6 @@ class HybridEnsemble:
             logger.info("Training meta-classifier...")
             self.meta_classifier.fit(meta_features, y_holdout, verbose=10)
 
-        else:
-            # Original OOF approach for smaller datasets
-            xgb_oof_proba, lstm_oof_proba = self.generate_out_of_fold_predictions(
-                X_scaled, y
-            )
-            meta_features = np.hstack([xgb_oof_proba, lstm_oof_proba])
-
-            # Train base learners on full training set
-            from sklearn.utils.class_weight import compute_sample_weight
-            sample_weights = compute_sample_weight(
-                class_weight='balanced',
-                y=y
-            )
-
-            logger.info("Training XGBoost base learner on full dataset")
-            # Create XGBoost config without early stopping for final fit
-            xgb_config_final = self.xgb_params.copy()
-            xgb_config_final.pop('early_stopping_rounds',
-                                 None)  # Remove early stopping
-            xgb_config_final.pop('eval_metric', None)  # Remove eval metric
-
-            self.xgb_base = xgb.XGBClassifier(**xgb_config_final)
-            self.xgb_base.fit(
-                X_scaled, y, sample_weight=sample_weights, verbose=50)
-
-            logger.info("Training LSTM base learner on full dataset")
-            self.lstm_base = LSTMSequenceModel(
-                input_size=X_scaled.shape[1], **self.lstm_params
-            )
-            self.lstm_base.fit(X_scaled, y, save_plots_path=save_plots_path)
-
-            # Train meta-classifier
-            logger.info("Training meta-classifier...")
-            self.meta_classifier.fit(meta_features, y, verbose=10)
-
         # Extract feature importance
         self.feature_importance_ = {
             "xgb_base": self.xgb_base.feature_importances_,
