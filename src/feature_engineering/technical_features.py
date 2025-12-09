@@ -24,7 +24,7 @@ from src.config import TECHNICAL_INDICATORS
 class TechnicalFeatureEngineer:
     """
     OPTIMIZED Technical indicator calculation
-    Reduced from 81 to ~27 features based on correlation analysis
+    Reduced from 81 to ~27 base features + 9 volatility regime features = ~36 total
 
     Core indicators (author's selection):
     - RSI: Highest predictive power
@@ -33,6 +33,14 @@ class TechnicalFeatureEngineer:
     - ADX/DI: Trend strength (not redundant with oscillators)
     - Returns: Autoregressive signal
     - Single volatility measure
+    
+    NEW: Volatility Regime Features (9 features):
+    - Parkinson & Garman-Klass volatility (efficient estimators)
+    - Volatility percentile & regime classification
+    - Volatility trend & vol-of-vol (regime stability)
+    - Price efficiency ratio (trending vs choppy)
+    - Vol-adjusted momentum (signal quality)
+    - Regime change detector (vol breakout)
     """
 
     def __init__(self, config: Dict = TECHNICAL_INDICATORS):
@@ -46,13 +54,20 @@ class TechnicalFeatureEngineer:
 
     def calculate_all_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Calculate OPTIMIZED technical indicators (lean set)
+        Calculate OPTIMIZED technical indicators + volatility regime features
 
         Args:
             df: OHLCV DataFrame
 
         Returns:
-            DataFrame with ~15 base technical features
+            DataFrame with ~27 base technical features + 9 volatility regime features = ~36 total
+            
+        Feature breakdown:
+        - Moving averages: 5 features (EMA 50/200, distances, cross)
+        - Momentum: 6 features (RSI, MACD components)
+        - Trend: 4 features (ADX, DI+, DI-, DI diff)
+        - Returns: 4 features (1/5/10 period returns, realized vol)
+        - Volatility regime: 9 features (regime detection, vol dynamics, efficiency)
         """
         df = df.copy()
 
@@ -67,6 +82,7 @@ class TechnicalFeatureEngineer:
         df = self._calculate_momentum_indicators(df)
         df = self._calculate_trend_indicators(df)
         df = self._calculate_returns(df)
+        df = self._calculate_volatility_regime(df)  # NEW: Volatility regime features
 
         # Drop NaN rows created by indicators
         df.dropna(inplace=True)
@@ -166,6 +182,73 @@ class TechnicalFeatureEngineer:
         # Single volatility measure (10-period rolling std)
         df["realized_vol"] = df["return_1"].rolling(window=10).std()
 
+        return df
+
+    def _calculate_volatility_regime(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Calculate volatility regime features - CRITICAL for adaptive trading
+        
+        Markets behave differently in different volatility regimes:
+        - Low vol: Mean reversion works, trends are weak
+        - High vol: Momentum works, breakouts are real
+        - Vol expansion: Regime change, be cautious
+        
+        These features help the model adapt its strategy to market conditions.
+        """
+        # 1. Parkinson volatility (uses high-low range, more efficient than close-to-close)
+        df["parkinson_vol"] = np.sqrt(
+            (1 / (4 * np.log(2))) * 
+            np.log(df["high"] / df["low"]) ** 2
+        ).rolling(window=20).mean()
+        
+        # 2. Garman-Klass volatility (even more efficient, uses OHLC)
+        hl = np.log(df["high"] / df["low"]) ** 2
+        co = np.log(df["close"] / df["open"]) ** 2
+        df["garman_klass_vol"] = np.sqrt(
+            0.5 * hl - (2 * np.log(2) - 1) * co
+        ).rolling(window=20).mean()
+        
+        # 3. Volatility percentile (where are we in the vol distribution?)
+        # 0 = lowest vol in 100 periods, 1 = highest vol
+        df["vol_percentile"] = df["realized_vol"].rolling(window=100).apply(
+            lambda x: pd.Series(x).rank(pct=True).iloc[-1] if len(x) > 0 else 0.5
+        )
+        
+        # 4. Volatility regime classification (categorical)
+        # Low: bottom 33%, Medium: middle 33%, High: top 33%
+        vol_33 = df["realized_vol"].rolling(window=100).quantile(0.33)
+        vol_67 = df["realized_vol"].rolling(window=100).quantile(0.67)
+        
+        df["vol_regime"] = 0  # Medium by default
+        df.loc[df["realized_vol"] < vol_33, "vol_regime"] = -1  # Low vol
+        df.loc[df["realized_vol"] > vol_67, "vol_regime"] = 1   # High vol
+        
+        # 5. Volatility trend (is vol expanding or contracting?)
+        df["vol_ma_short"] = df["realized_vol"].rolling(window=5).mean()
+        df["vol_ma_long"] = df["realized_vol"].rolling(window=20).mean()
+        df["vol_trend"] = (df["vol_ma_short"] - df["vol_ma_long"]) / df["vol_ma_long"]
+        
+        # 6. Volatility-of-volatility (vol stability)
+        # High vol-of-vol = unstable regime, be cautious
+        df["vol_of_vol"] = df["realized_vol"].rolling(window=20).std()
+        
+        # 7. Price efficiency ratio (trending vs choppy)
+        # 1 = perfect trend, 0 = random walk
+        price_change = abs(df["close"] - df["close"].shift(10))
+        path_length = abs(df["close"].diff()).rolling(window=10).sum()
+        df["efficiency_ratio"] = price_change / path_length.replace(0, np.nan)
+        
+        # 8. Volatility-adjusted momentum (momentum normalized by vol)
+        # High momentum in low vol = strong signal
+        # High momentum in high vol = noise
+        df["vol_adj_momentum"] = df["return_5"] / (df["realized_vol"] + 1e-8)
+        
+        # 9. Regime change detector (vol breakout)
+        # 1 = vol breaking out (regime change likely)
+        vol_upper_band = df["realized_vol"].rolling(window=20).mean() + \
+                        2 * df["realized_vol"].rolling(window=20).std()
+        df["vol_breakout"] = (df["realized_vol"] > vol_upper_band).astype(int)
+        
         return df
 
     def add_multi_timeframe_features(

@@ -145,38 +145,38 @@ ENSEMBLE_CONFIG = {
             "num_class": 2,             # Changed from 3 to 2 (Buy/Sell)
         },
         "lstm": {
-            # Architecture - BALANCED: Big enough for GPUs, small enough to learn
-            "sequence_length": 40,      # Back to 40 - sweet spot
-            "hidden_size": 60,          # Moderate size
+            # Architecture - SMALLER for better generalization
+            "sequence_length": 30,      # Reduced - less overfitting on long sequences
+            "hidden_size": 48,          # Smaller - prevents memorization
             "num_layers": 1,            # Single layer - simpler = better generalization
             "bidirectional": False,
             "hidden_activation": None,  # NO activation - LSTM gates provide non-linearity
 
-            # Regularization - BatchNorm only
-            "use_batch_norm": False,     # ENABLED - stabilizes training
-            "dropout": 0.05,             # DISABLED - use BatchNorm only
+            # Regularization - AGGRESSIVE to prevent overfitting
+            "use_batch_norm": True,     # ENABLED - stabilizes training
+            "dropout": 0.3,             # INCREASED - strong regularization needed
 
-            # Weight regularization - BALANCED
-            "l1_lambda": 1e-6,          # Light L1
-            "l2_lambda": 1e-3,          # Moderate L2
+            # Weight regularization - STRONGER
+            "l1_lambda": 1e-5,          # Increased L1 for sparsity
+            "l2_lambda": 1e-2,          # 10x stronger L2 to prevent overfitting
 
-            "label_smoothing": 0.05,     # Standard smoothing
+            "label_smoothing": 0.1,     # Increased - forex is noisy
 
-            # Learning rate - MODERATE for stable learning
-            "learning_rate": 1e-4,      # Standard rate
-            "lr_warmup_epochs": 5,      # Warmup
-            "lr_min_factor": 0.01,      # Standard min
+            # Learning rate - LOWER for more stable learning
+            "learning_rate": 5e-5,      # Reduced from 1e-4
+            "lr_warmup_epochs": 3,      # Shorter warmup
+            "lr_min_factor": 0.1,       # Higher minimum to prevent overfitting
 
-            # Training schedule - LARGE BATCHES for GPU saturation
-            "batch_size": 10000,         # Large batch (not extreme)
+            # Training schedule - LARGER BATCHES for better generalization
+            "batch_size": 16384,        # Larger batch = smoother gradients
             "epochs": 500,
-            "early_stopping_patience": 20,
+            "early_stopping_patience": 8,  # CRITICAL: Stop much earlier
 
             # Optimizer
             "optimizer": "adamw",
             "beta1": 0.9,
             "beta2": 0.999,
-            "max_grad_norm": 1.0,       # Standard clipping
+            "max_grad_norm": 0.5,       # Tighter gradient clipping
 
             # Classification
             "num_classes": 2,
