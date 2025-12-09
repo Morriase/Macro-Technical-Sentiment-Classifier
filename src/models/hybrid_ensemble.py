@@ -230,11 +230,20 @@ class HybridEnsemble:
                 val_idx = val_idx[-max_val_samples:]
                 logger.info(f"    Subsampled val to {len(val_idx):,} samples")
 
-            # Use float32 to reduce memory
-            X_train_fold = X[train_idx].astype(np.float32)
+            # CRITICAL FIX: Scale data INSIDE each fold to prevent data leakage
+            # 1. Split RAW data first
+            X_train_raw = X[train_idx].astype(np.float32)
+            X_val_raw = X[val_idx].astype(np.float32)
             y_train_fold = y[train_idx]
-            X_val_fold = X[val_idx].astype(np.float32)
             y_val_fold = y[val_idx]
+            
+            # 2. Fit scaler ONLY on training fold
+            from sklearn.preprocessing import StandardScaler
+            fold_scaler = StandardScaler()
+            X_train_fold = fold_scaler.fit_transform(X_train_raw)
+            
+            # 3. Transform validation fold using training scaler
+            X_val_fold = fold_scaler.transform(X_val_raw)
 
             # ===== XGBoost FIRST (then delete) =====
             logger.info(f"  → Training XGBoost (fold {fold_idx + 1})...")
@@ -341,9 +350,6 @@ class HybridEnsemble:
             raise ValueError(
                 f"Feature names length ({len(self.feature_names_)}) must match X.shape[1] ({self.n_features_})")
 
-        # Scale features
-        X_scaled = self.scaler.fit_transform(X)
-
         # Walk-Forward Optimization should NOT be called from within WFO itself
         # This prevents infinite recursion
         if use_walk_forward:
@@ -357,10 +363,16 @@ class HybridEnsemble:
             )
 
         # Generate OOF predictions for meta-learner training
+        # CRITICAL FIX: Pass RAW data, scaling happens INSIDE each fold to prevent data leakage
         logger.info("Generating out-of-fold predictions for meta-learner...")
         xgb_oof_proba, lstm_oof_proba = self.generate_out_of_fold_predictions(
-            X_scaled, y
+            X, y  # Pass RAW data, not scaled
         )
+
+        # Now fit the final scaler on the FULL training set for production use
+        # This is OK because we're done with OOF validation
+        logger.info("Fitting final scaler on full training set...")
+        X_scaled = self.scaler.fit_transform(X)
 
         # Train base learners on full dataset
         from sklearn.utils.class_weight import compute_sample_weight

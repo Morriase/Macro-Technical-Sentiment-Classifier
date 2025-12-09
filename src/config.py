@@ -145,8 +145,10 @@ ENSEMBLE_CONFIG = {
             "num_class": 2,             # Changed from 3 to 2 (Buy/Sell)
         },
         "lstm": {
-            # Architecture - SMALLER for better generalization
-            "sequence_length": 30,      # Reduced - less overfitting on long sequences
+            # Architecture - EXTENDED HORIZON for better pattern recognition
+            # FIX: 30 steps × 5min = 2.5 hours is too short for macro-technical patterns
+            # NEW: 100 steps × 5min = 8.3 hours (matches forward_window prediction horizon)
+            "sequence_length": 100,     # CRITICAL FIX: Extended from 30 to 100
             "hidden_size": 48,          # Smaller - prevents memorization
             "num_layers": 1,            # Single layer - simpler = better generalization
             "bidirectional": False,

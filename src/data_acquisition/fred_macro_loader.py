@@ -91,8 +91,9 @@ ECONOMIC_INDICATORS = {
     },
     # Eurozone
     "EU": {
-        "gdp_growth": "CLVMNACSCAB1GQEA19",   # EA19 Real GDP
-        "inflation_cpi": "EA19CPALTT01GYM",    # EA19 CPI
+        # FIXED: Updated to currently active FRED series
+        "gdp_growth": "CPMNACSCAB1GQEL",      # EA GDP Constant Prices (FIXED from CLVMNACSCAB1GQEA19)
+        "inflation_cpi": "CP0000EZ19M086NEST", # EA HICP (FIXED from EA19CPALTT01GYM)
         "unemployment": "LRHUTTTTEZM156S",     # EA Unemployment Rate
         "industrial_production": "EA19PRINTO01IXOBM",  # EA Industrial Production
         "consumer_confidence": "CSCICP03EZM460S",      # Consumer Confidence
