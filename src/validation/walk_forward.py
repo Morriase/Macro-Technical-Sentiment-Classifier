@@ -56,18 +56,27 @@ class WalkForwardSplitter:
         self.min_train_samples = min_train_samples
 
     def split(
-        self, df: pd.DataFrame, date_column: str = "timestamp"
+        self, df, date_column: str = "timestamp"
     ) -> Generator[Tuple[pd.Index, pd.Index], None, None]:
         """
         Generate walk-forward train/test splits
 
         Args:
-            df: DataFrame with temporal index or date column
+            df: DataFrame or numpy array with temporal index or date column
             date_column: Name of date column (if not using index)
 
         Yields:
             Tuples of (train_indices, test_indices)
         """
+        # Handle both DataFrame and numpy array inputs
+        if isinstance(df, np.ndarray):
+            # For numpy arrays, we can't do time-based splitting
+            # Fall back to simple sequential splits
+            raise TypeError(
+                "WalkForwardSplitter.split() requires a pandas DataFrame with temporal information. "
+                "Received numpy.ndarray instead. Please pass the original DataFrame."
+            )
+        
         if date_column in df.columns:
             dates = pd.to_datetime(df[date_column])
         else:

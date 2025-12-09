@@ -22,6 +22,13 @@ project_root = Path(__file__).parent.parent.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
+# Check for CUDA availability
+try:
+    import torch
+    USE_CUDA = torch.cuda.is_available()
+except ImportError:
+    USE_CUDA = False
+
 
 class HybridEnsemble:
     """
@@ -306,6 +313,7 @@ class HybridEnsemble:
         y_val: Optional[np.ndarray] = None,
         save_plots_path: Optional[str] = None,
         feature_names: Optional[List[str]] = None,
+        use_walk_forward: bool = False,
     ):
         """
         Train the hybrid ensemble
@@ -317,6 +325,7 @@ class HybridEnsemble:
             y_val: Validation labels (optional)
             save_plots_path: Path prefix for saving training plots (optional)
             feature_names: List of feature column names (CRITICAL for inference alignment)
+            use_walk_forward: Whether to use walk-forward optimization (should only be True from main pipeline)
         """
         # logger.info("Training Hybrid Ensemble")
         # logger.info(f"Training samples: {len(X)}, Features: {X.shape[1]}")
@@ -335,41 +344,20 @@ class HybridEnsemble:
         # Scale features
         X_scaled = self.scaler.fit_transform(X)
 
-        # ALWAYS use Walk-Forward Optimization (no simple split fallback)
-        logger.info(f"Using Walk-Forward Optimization for {len(X):,} samples")
-
-        # Use walk-forward from validation module
-        from src.validation.walk_forward import WalkForwardOptimizer
-
-        wfo = WalkForwardOptimizer(model_class=HybridEnsemble)
-
-        # Get feature columns
-        exclude_cols = ["open", "high", "low", "close", "volume",
-                        "forward_close", "forward_return", "forward_return_pips",
-                        "target", "target_class", "date"]
-        feature_cols = [col for col in range(
-            X.shape[1]) if col not in exclude_cols]
-
-        # Run walk-forward optimization
-        results = wfo.run_walk_forward_optimization(
-            df=X_scaled,
-            feature_columns=feature_cols,
-            target_column=y,
-            optimize_each_window=False,
-        )
-
-        # Use the last fold's model
-        if results:
-            self.xgb_base = results[-1].get('xgb_model')
-            self.lstm_base = results[-1].get('lstm_model')
-            logger.info("Walk-Forward training completed")
-            return
-
-        # Fallback (should not reach here normally)
-        logger.warning(
-            "Walk-Forward returned no results, using simple OOF training")
+        # Walk-Forward Optimization should NOT be called from within WFO itself
+        # This prevents infinite recursion
+        if use_walk_forward:
+            logger.error(
+                "use_walk_forward=True should not be set when calling fit() from WalkForwardOptimizer. "
+                "WFO should be called from the main pipeline, not from within the model."
+            )
+            raise ValueError(
+                "Recursive walk-forward optimization detected. "
+                "Please call WalkForwardOptimizer.run_walk_forward_optimization() from the main pipeline instead."
+            )
 
         # Generate OOF predictions for meta-learner training
+        logger.info("Generating out-of-fold predictions for meta-learner...")
         xgb_oof_proba, lstm_oof_proba = self.generate_out_of_fold_predictions(
             X_scaled, y
         )
