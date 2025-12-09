@@ -335,116 +335,96 @@ class HybridEnsemble:
         # Scale features
         X_scaled = self.scaler.fit_transform(X)
 
-        # Memory check - skip OOF for large datasets
-        max_samples_for_oof = 5000000  # Increased to use OOF for all datasets
-        if len(X) > max_samples_for_oof:
-            logger.info(
-                f"Dataset too large ({len(X):,} samples) for OOF - using simple split")
+        # ALWAYS use Walk-Forward Optimization (no simple split fallback)
+        logger.info(f"Using Walk-Forward Optimization for {len(X):,} samples")
 
-            # CRITICAL: Add gap between train/val to prevent LSTM sequence leakage
-            # Gap must be >= sequence_length + forward_window to prevent ANY overlap
-            # sequence_length = lookback window, forward_window = prediction horizon
-            seq_length = self.lstm_params.get('sequence_length', 40)
-            # forward_window_hours=8 / 4h_bars = 2 bars, but we use M5 so: 8*12=96 M5 bars
-            # 8 hours of M5 data (expert recommendation: test shorter horizon)
-            forward_bars = 96
-            gap = seq_length + forward_bars  # 40 + 96 = 136 samples minimum
+        # Use walk-forward from validation module
+        from src.validation.walk_forward import WalkForwardOptimizer
 
-            # Use last 20% as holdout for meta-learner training
-            split_idx = int(len(X_scaled) * 0.8)
-            X_train_full = X_scaled[:split_idx - gap]  # Leave gap before split
-            y_train_full = y[:split_idx - gap]
-            X_holdout_full = X_scaled[split_idx:]  # Holdout starts after gap
-            y_holdout_full = y[split_idx:]
+        wfo = WalkForwardOptimizer(model_class=HybridEnsemble)
 
-            logger.info(
-                f"  Train/Val gap: {gap} samples (prevents LSTM sequence leakage)")
+        # Get feature columns
+        exclude_cols = ["open", "high", "low", "close", "volume",
+                        "forward_close", "forward_return", "forward_return_pips",
+                        "target", "target_class", "date"]
+        feature_cols = [col for col in range(
+            X.shape[1]) if col not in exclude_cols]
 
-            # Subsample using STRATIFIED RANDOM SAMPLING (not tail!) for balanced classes
-            max_train = 2000000  # Increased to use full dataset
-            max_holdout = 500000
+        # Run walk-forward optimization
+        results = wfo.run_walk_forward_optimization(
+            df=X_scaled,
+            feature_columns=feature_cols,
+            target_column=y,
+            optimize_each_window=False,
+        )
 
-            # Prepare XGBoost training data (Stratified Sampling OK)
-            if len(X_train_full) > max_train:
-                # Use stratified sampling to maintain class balance
-                from sklearn.model_selection import train_test_split
-                _, X_train_base, _, y_train_base = train_test_split(
-                    X_train_full, y_train_full,
-                    test_size=max_train,
-                    stratify=y_train_full,
-                    random_state=self.random_state
-                )
-                logger.info(
-                    f"  Stratified sample (XGB): {max_train:,} training samples")
-            else:
-                X_train_base = X_train_full
-                y_train_base = y_train_full
+        # Use the last fold's model
+        if results:
+            self.xgb_base = results[-1].get('xgb_model')
+            self.lstm_base = results[-1].get('lstm_model')
+            logger.info("Walk-Forward training completed")
+            return
 
-            # Prepare LSTM training data (MUST BE CONTINUOUS - NO SHUFFLING)
-            # Use the most recent data (tail of training set)
-            if len(X_train_full) > max_train:
-                X_train_lstm = X_train_full[-max_train:]
-                y_train_lstm = y_train_full[-max_train:]
-                logger.info(
-                    f"  Continuous sample (LSTM): last {max_train:,} training samples")
-            else:
-                X_train_lstm = X_train_full
-                y_train_lstm = y_train_full
+        # Fallback (should not reach here)
+        logger.warning(
+            "Walk-Forward returned no results, using simple training")
 
-            if len(X_holdout_full) > max_holdout:
-                # Take from END of holdout (most recent data for validation)
-                X_holdout = X_holdout_full[-max_holdout:]
-                y_holdout = y_holdout_full[-max_holdout:]
-                logger.info(f"  Holdout: last {max_holdout:,} samples")
-            else:
-                X_holdout = X_holdout_full
-                y_holdout = y_holdout_full
+        # Simple training as fallback
+        max_train = 2000000
+        max_holdout = 500000
 
-            # Clean up large arrays
-            del X_train_full, y_train_full, X_holdout_full, y_holdout_full
-            import gc
-            gc.collect()
+        # Use last 20% as holdout
+        split_idx = int(len(X_scaled) * 0.8)
+        X_train_full = X_scaled[:split_idx]
+        y_train_full = y[:split_idx]
+        X_holdout = X_scaled[split_idx:]
+        y_holdout = y[split_idx:]
 
-            # Train base learners on subsampled data
-            logger.info("Training XGBoost base learner...")
-            from sklearn.utils.class_weight import compute_sample_weight
+        # Subsample if needed
+        if len(X_train_full) > max_train:
+            X_train_base = X_train_full[-max_train:]
+            y_train_base = y_train_full[-max_train:]
+        else:
+            X_train_base = X_train_full
+            y_train_base = y_train_full
 
-            # CRITICAL FIX: Dynamic class weights for Binary Classification
-            # We use 'balanced' to automatically handle any imbalance between Buy/Sell
-            sample_weights = compute_sample_weight(
-                class_weight='balanced',
-                y=y_train_base
+        if len(X_holdout) > max_holdout:
+            X_holdout = X_holdout[-max_holdout:]
+            y_holdout = y_holdout[-max_holdout:]
+
+        logger.info("Training XGBoost base learner...")
+        from sklearn.utils.class_weight import compute_sample_weight
+
+        sample_weights = compute_sample_weight(
+            class_weight='balanced',
+            y=y_train_base
+        )
+        self.xgb_base.fit(
+            X_train_base, y_train_base,
+            sample_weight=sample_weights,
+            eval_set=[(X_holdout[:3000], y_holdout[:3000])],
+            verbose=50,
+        )
+
+        # LSTM training (skip if BASELINE_MODE or USE_LSTM=False)
+        if USE_LSTM and not BASELINE_MODE:
+            logger.info("Training LSTM base learner...")
+            self.lstm_base = LSTMSequenceModel(
+                input_size=X_scaled.shape[1], **self.lstm_params
             )
-            self.xgb_base.fit(
-                X_train_base, y_train_base,
-                sample_weight=sample_weights,
-                # Very small eval set to reduce memory
-                eval_set=[(X_holdout[:3000], y_holdout[:3000])],
-                verbose=50,
+            self.lstm_base.fit(
+                X_train_lstm,
+                y_train_lstm,
+                X_holdout[:5000],
+                y_holdout[:5000],
+                save_plots_path=save_plots_path,
             )
-
-            # LSTM training (skip if BASELINE_MODE or USE_LSTM=False)
-            # Expert: compare XGBoost-only vs hybrid to see if LSTM adds value
-            if USE_LSTM and not BASELINE_MODE:
-                logger.info("Training LSTM base learner...")
-                self.lstm_base = LSTMSequenceModel(
-                    input_size=X_scaled.shape[1], **self.lstm_params
-                )
-                # CRITICAL: Use X_train_lstm (continuous) not X_train_base (shuffled)
-                self.lstm_base.fit(
-                    X_train_lstm,
-                    y_train_lstm,
-                    X_holdout[:5000],
-                    y_holdout[:5000],
-                    save_plots_path=save_plots_path,
-                )
+        else:
+            if BASELINE_MODE:
+                logger.info("Skipping LSTM (BASELINE_MODE=True)")
             else:
-                if BASELINE_MODE:
-                    logger.info(
-                        "Skipping LSTM (BASELINE_MODE=True - XGBoost-only experiment)")
-                else:
-                    logger.info("Skipping LSTM (USE_LSTM=False)")
-                self.lstm_base = None
+                logger.info("Skipping LSTM (USE_LSTM=False)")
+            self.lstm_base = None
 
             # Generate meta-features from holdout predictions
             logger.info("Generating meta-features from holdout set...")

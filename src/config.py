@@ -170,7 +170,7 @@ ENSEMBLE_CONFIG = {
             # Training schedule - LARGE BATCHES for GPU saturation
             "batch_size": 10000,         # Large batch (not extreme)
             "epochs": 500,
-            "early_stopping_patience": 0,
+            "early_stopping_patience": 20,
 
             # Optimizer
             "optimizer": "adamw",
