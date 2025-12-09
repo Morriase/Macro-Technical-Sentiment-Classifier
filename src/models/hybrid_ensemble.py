@@ -365,103 +365,42 @@ class HybridEnsemble:
             logger.info("Walk-Forward training completed")
             return
 
-        # Fallback (should not reach here)
+        # Fallback (should not reach here normally)
         logger.warning(
-            "Walk-Forward returned no results, using simple training")
+            "Walk-Forward returned no results, using simple OOF training")
 
-        # Simple training as fallback
-        max_train = 2000000
-        max_holdout = 500000
+        # Generate OOF predictions for meta-learner training
+        xgb_oof_proba, lstm_oof_proba = self.generate_out_of_fold_predictions(
+            X_scaled, y
+        )
 
-        # Use last 20% as holdout
-        split_idx = int(len(X_scaled) * 0.8)
-        X_train_full = X_scaled[:split_idx]
-        y_train_full = y[:split_idx]
-        X_holdout = X_scaled[split_idx:]
-        y_holdout = y[split_idx:]
-
-        # Subsample if needed
-        if len(X_train_full) > max_train:
-            X_train_base = X_train_full[-max_train:]
-            y_train_base = y_train_full[-max_train:]
-        else:
-            X_train_base = X_train_full
-            y_train_base = y_train_full
-
-        if len(X_holdout) > max_holdout:
-            X_holdout = X_holdout[-max_holdout:]
-            y_holdout = y_holdout[-max_holdout:]
-
-        logger.info("Training XGBoost base learner...")
+        # Train base learners on full dataset
         from sklearn.utils.class_weight import compute_sample_weight
+        sample_weights = compute_sample_weight(class_weight='balanced', y=y)
 
-        sample_weights = compute_sample_weight(
-            class_weight='balanced',
-            y=y_train_base
-        )
+        logger.info("Training XGBoost base learner on full dataset...")
+        xgb_config_final = self.xgb_params.copy()
+        xgb_config_final.pop('early_stopping_rounds', None)
+        self.xgb_base = xgb.XGBClassifier(**xgb_config_final)
         self.xgb_base.fit(
-            X_train_base, y_train_base,
-            sample_weight=sample_weights,
-            eval_set=[(X_holdout[:3000], y_holdout[:3000])],
-            verbose=50,
-        )
+            X_scaled, y, sample_weight=sample_weights, verbose=50)
 
-        # LSTM training (skip if BASELINE_MODE or USE_LSTM=False)
+        # LSTM training
         if USE_LSTM and not BASELINE_MODE:
-            logger.info("Training LSTM base learner...")
+            logger.info("Training LSTM base learner on full dataset...")
             self.lstm_base = LSTMSequenceModel(
                 input_size=X_scaled.shape[1], **self.lstm_params
             )
-            self.lstm_base.fit(
-                X_train_lstm,
-                y_train_lstm,
-                X_holdout[:5000],
-                y_holdout[:5000],
-                save_plots_path=save_plots_path,
-            )
+            self.lstm_base.fit(X_scaled, y, save_plots_path=save_plots_path)
+            meta_features = np.hstack([xgb_oof_proba, lstm_oof_proba])
         else:
-            if BASELINE_MODE:
-                logger.info("Skipping LSTM (BASELINE_MODE=True)")
-            else:
-                logger.info("Skipping LSTM (USE_LSTM=False)")
+            logger.info("Skipping LSTM (USE_LSTM=False or BASELINE_MODE=True)")
             self.lstm_base = None
+            meta_features = xgb_oof_proba
 
-            # Generate meta-features from holdout predictions
-            logger.info("Generating meta-features from holdout set...")
-            xgb_holdout_proba = self._xgb_predict_proba(
-                self.xgb_base, X_holdout)
-            logger.info(f"XGB holdout shape: {xgb_holdout_proba.shape}")
-
-            if USE_LSTM and not BASELINE_MODE and self.lstm_base is not None:
-                lstm_holdout_proba = self.lstm_base.predict_proba(X_holdout)
-                logger.info(
-                    f"LSTM holdout shape (raw): {lstm_holdout_proba.shape}")
-
-                # Handle LSTM sequence offset
-                if len(lstm_holdout_proba) < len(xgb_holdout_proba):
-                    n_missing = len(xgb_holdout_proba) - \
-                        len(lstm_holdout_proba)
-                    # Dynamic class count based on actual predictions
-                    n_classes = lstm_holdout_proba.shape[1]
-                    uniform_proba = np.full(
-                        (n_missing, n_classes), 1.0/n_classes, dtype=np.float32)
-                    lstm_holdout_proba = np.vstack(
-                        [uniform_proba, lstm_holdout_proba])
-
-                logger.info(
-                    f"LSTM holdout shape (padded): {lstm_holdout_proba.shape}")
-                meta_features = np.hstack(
-                    [xgb_holdout_proba, lstm_holdout_proba])
-            else:
-                # XGBoost-only: meta-features are just XGBoost probabilities
-                meta_features = xgb_holdout_proba
-
-            logger.info(f"Meta-features shape: {meta_features.shape}")
-            logger.info(f"y_holdout shape: {y_holdout.shape}")
-
-            # Train meta-classifier
-            logger.info("Training meta-classifier...")
-            self.meta_classifier.fit(meta_features, y_holdout, verbose=10)
+        # Train meta-classifier
+        logger.info("Training meta-classifier...")
+        self.meta_classifier.fit(meta_features, y, verbose=10)
 
         # Extract feature importance
         self.feature_importance_ = {

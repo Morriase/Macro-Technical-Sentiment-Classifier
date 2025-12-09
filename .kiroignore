@@ -1,0 +1,33 @@
+Markdowns
+venv-linux
+logs
+Macro-Technical-Sentiment-Classifier
+.git
+.github
+.vscode
+.venv
+# Dependency folders
+venv/
+env/
+.venv/
+lib/
+__pycache__/
+
+# Build/Distro folders
+build/
+dist/
+*.egg-info/
+
+# Logs and Documentation
+logs/
+docs/
+
+# Testing and Coverage
+.coverage
+htmlcov/
+
+# Common editor/OS files to ignore
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
