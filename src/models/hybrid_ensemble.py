@@ -181,16 +181,19 @@ class HybridEnsemble:
         return preds.reshape(-1, n_classes).astype(np.float32)
 
     def generate_out_of_fold_predictions(
-        self, X: np.ndarray, y: np.ndarray
+        self, X: np.ndarray, y: np.ndarray, y_magnitude: Optional[np.ndarray] = None
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Generate out-of-fold predictions from base learners
         Prevents data leakage to meta-learner
         MEMORY OPTIMIZED: Process one model at a time, aggressive cleanup
+        
+        ZIGZAG UPDATE: Supports magnitude target for LSTM dual output
 
         Args:
             X: Features (n_samples, n_features)
-            y: Labels (n_samples,)
+            y: Direction labels (n_samples,)
+            y_magnitude: Magnitude targets (n_samples,) - ZIGZAG optional
 
         Returns:
             Tuple of (xgb_oof_proba, lstm_oof_proba)
@@ -282,7 +285,14 @@ class HybridEnsemble:
             lstm_fold = LSTMSequenceModel(
                 input_size=n_features, **self.lstm_params
             )
-            lstm_fold.fit(X_train_fold, y_train_fold, X_val_fold, y[val_idx])
+            # ZIGZAG: Pass magnitude targets if available
+            if y_magnitude is not None:
+                y_train_mag = y_magnitude[train_idx]
+                y_val_mag = y_magnitude[val_idx]
+                lstm_fold.fit(X_train_fold, y_train_fold, y_magnitude=y_train_mag, 
+                            X_val=X_val_fold, y_val=y[val_idx], y_val_magnitude=y_val_mag)
+            else:
+                lstm_fold.fit(X_train_fold, y_train_fold, X_val=X_val_fold, y_val=y[val_idx])
             lstm_proba_fold = lstm_fold.predict_proba(X_val_fold)
 
             # Log LSTM fold accuracy
@@ -374,8 +384,9 @@ class HybridEnsemble:
         # Generate OOF predictions for meta-learner training
         # CRITICAL FIX: Pass RAW data, scaling happens INSIDE each fold to prevent data leakage
         logger.info("Generating out-of-fold predictions for meta-learner...")
+        # ZIGZAG: Pass magnitude target if available
         xgb_oof_proba, lstm_oof_proba = self.generate_out_of_fold_predictions(
-            X, y  # Pass RAW data, not scaled
+            X, y, y_magnitude  # Pass RAW data + magnitude, not scaled
         )
 
         # Now fit the final scaler on the FULL training set for production use

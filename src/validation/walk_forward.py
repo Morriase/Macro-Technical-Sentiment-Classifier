@@ -351,6 +351,11 @@ class WalkForwardOptimizer:
             y_train = df.loc[train_idx, target_column].values
             X_test = df.loc[test_idx, feature_columns].values
             y_test = df.loc[test_idx, target_column].values
+            
+            # ZIGZAG: Extract magnitude target if available
+            y_train_magnitude = None
+            if 'target_magnitude_norm' in df.columns:
+                y_train_magnitude = df.loc[train_idx, 'target_magnitude_norm'].values
 
             # Further split training data for validation (nested CV)
             val_size = int(len(X_train) * 0.2)
@@ -392,8 +397,13 @@ class WalkForwardOptimizer:
                 fold_plot_path = f"{save_plots_path}_fold{fold_idx + 1}"
 
             # Pass feature names for inference server alignment (CRITICAL!)
-            model.fit(X_train, y_train, save_plots_path=fold_plot_path,
-                      feature_names=feature_columns)
+            # ZIGZAG: Pass magnitude target if available
+            if y_train_magnitude is not None:
+                model.fit(X_train, y_train, y_magnitude=y_train_magnitude,
+                         save_plots_path=fold_plot_path, feature_names=feature_columns)
+            else:
+                model.fit(X_train, y_train, save_plots_path=fold_plot_path,
+                         feature_names=feature_columns)
 
             # Evaluate on OOS test set
             y_pred = model.predict(X_test)
