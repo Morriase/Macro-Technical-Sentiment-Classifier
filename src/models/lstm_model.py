@@ -259,8 +259,11 @@ class LSTMSequenceModel:
         # Device
         self.device = torch.device(device if device else DEVICE)
 
-        # ZIGZAG: Check if dual output is enabled in config
-        self.dual_output = ENSEMBLE_CONFIG.get('base_learners', {}).get('lstm', {}).get('num_outputs', 1) == 2
+        # ZIGZAG: Dual output DISABLED for now - magnitude loss was causing issues
+        # The magnitude target wasn't being passed correctly through the OOF pipeline
+        # TODO: Re-enable once the pipeline properly passes magnitude through all paths
+        self.dual_output = False  # DISABLED: Was causing Val Loss explosion
+        # self.dual_output = ENSEMBLE_CONFIG.get('base_learners', {}).get('lstm', {}).get('num_outputs', 1) == 2
         
         # Initialize model
         self.model = LSTMSequenceClassifier(

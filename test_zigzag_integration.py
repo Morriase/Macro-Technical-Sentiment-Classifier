@@ -72,11 +72,12 @@ print("FEATURE-TARGET CORRELATIONS")
 print("="*80)
 
 features = ['rsi_norm', 'macd_diff_norm', 'candle_body_norm']
-targets = ['target_direction', 'target_magnitude_norm']
+targets = ['target_direction', 'target_magnitude']
 
 for feature in features:
     for target in targets:
-        corr = np.corrcoef(df[feature].values, df[target].values)[0, 1]
+        valid_mask = ~df[target].isna()
+        corr = np.corrcoef(df.loc[valid_mask, feature].values, df.loc[valid_mask, target].values)[0, 1]
         print(f"  {feature:20s} → {target:25s}: {corr:7.4f}")
 
 # Summary
@@ -93,12 +94,12 @@ else:
 
 print(f"\nSample data shape: {df.shape}")
 print(f"Features: {features}")
-print(f"Targets: {targets}")
+print(f"Targets: ['target_direction', 'target_magnitude']")
 
 # Save sample for inspection
 df_sample = df[['close', 'rsi_norm', 'macd_diff_norm', 'candle_body_norm',
-                'target_direction', 'target_magnitude', 'target_magnitude_norm',
-                'next_extremum_price', 'next_extremum_type']].head(100)
+                'target_direction', 'target_magnitude', 'bars_to_extremum',
+                'zigzag', 'extremum_type']].head(100)
 df_sample.to_csv('zigzag_integration_test_sample.csv')
 print(f"\n✓ Saved sample to: zigzag_integration_test_sample.csv")
 
