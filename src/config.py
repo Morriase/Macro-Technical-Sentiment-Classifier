@@ -157,31 +157,31 @@ ENSEMBLE_CONFIG = {
             "num_outputs": 2,           # Direction (classification) + Magnitude (regression)
             "output_types": ["classification", "regression"],
 
-            # Regularization - MAXIMUM to prevent overfitting
+            # Regularization - BALANCED for small datasets
             "use_batch_norm": True,     # ENABLED - stabilizes training
-            "dropout": 0.5,             # MAXIMUM - very strong regularization
+            "dropout": 0.3,             # REDUCED from 0.5 - too aggressive for small data
 
-            # Weight regularization - MAXIMUM
-            "l1_lambda": 1e-4,          # 10x stronger L1 for sparsity
-            "l2_lambda": 5e-2,          # 5x stronger L2 to prevent overfitting
+            # Weight regularization - MODERATE
+            "l1_lambda": 1e-5,          # Reduced - was too strong
+            "l2_lambda": 1e-3,          # Reduced from 5e-2 - was preventing learning
 
-            "label_smoothing": 0.15,    # Increased - forex is very noisy
+            "label_smoothing": 0.1,     # Reduced from 0.15
 
-            # Learning rate - LOWER for more stable learning
-            "learning_rate": 5e-5,      # Reduced from 1e-4
-            "lr_warmup_epochs": 3,      # Shorter warmup
-            "lr_min_factor": 0.1,       # Higher minimum to prevent overfitting
+            # Learning rate - HIGHER for faster convergence on small data
+            "learning_rate": 1e-3,      # Increased from 5e-5 - was way too low!
+            "lr_warmup_epochs": 5,      # Longer warmup for stability
+            "lr_min_factor": 0.01,      # Allow LR to decay more
 
-            # Training schedule - LARGER BATCHES for better generalization
-            "batch_size": 16384,        # Larger batch = smoother gradients
-            "epochs": 500,
-            "early_stopping_patience": 8,  # CRITICAL: Stop much earlier
+            # Training schedule - SMALLER BATCHES for small datasets
+            "batch_size": 512,          # Reduced from 16384 - better for 5K samples
+            "epochs": 200,              # Reduced - don't need 500
+            "early_stopping_patience": 20,  # More patience to find good solution
 
             # Optimizer
             "optimizer": "adamw",
             "beta1": 0.9,
             "beta2": 0.999,
-            "max_grad_norm": 0.5,       # Tighter gradient clipping
+            "max_grad_norm": 1.0,       # Relaxed from 0.5
 
             # Classification (direction only - magnitude is regression)
             "num_classes": 2,           # Buy (1) or Sell (0)
