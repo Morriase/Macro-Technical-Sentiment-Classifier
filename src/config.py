@@ -157,11 +157,11 @@ ENSEMBLE_CONFIG = {
             "num_outputs": 2,           # Direction (classification) + Magnitude (regression)
             "output_types": ["classification", "regression"],
 
-            # VARIANCE REDUCTION: Advanced Regularization
-            "use_batch_norm": True,     # ENABLED - stabilizes training
-            "dropout": 0.2,             # REDUCED: Lower dropout for more stable learning
-            "recurrent_dropout": 0.1,   # NEW: Dropout on recurrent connections
-            "layer_norm": True,         # NEW: Layer normalization for stability
+            # VARIANCE REDUCTION: BatchNorm + LayerNorm only (no dropout)
+            "use_batch_norm": True,     # ENABLED - stabilizes training and provides regularization
+            "dropout": 0.0,             # DISABLED: Turn off dropout to reduce variance
+            "recurrent_dropout": 0.0,   # DISABLED: Turn off recurrent dropout
+            "layer_norm": True,         # ENABLED - Layer normalization for stability
 
             # Weight regularization - OPTIMIZED
             "l1_lambda": 5e-6,          # REDUCED: Less aggressive L1
@@ -191,11 +191,11 @@ ENSEMBLE_CONFIG = {
             "max_grad_norm": 0.5,       # REDUCED: Stricter gradient clipping
             "gradient_accumulation_steps": 2,  # NEW: Accumulate gradients for stability
 
-            # VARIANCE REDUCTION: Advanced Training Techniques
+            # VARIANCE REDUCTION: Advanced Training Techniques (reduced since no dropout)
             "use_ema": True,            # NEW: Exponential moving average of weights
             "ema_decay": 0.999,         # EMA decay rate
-            "noise_std": 0.01,          # NEW: Small noise injection for regularization
-            "mixup_alpha": 0.1,         # NEW: Mixup augmentation for robustness
+            "noise_std": 0.0,           # DISABLED: No noise injection (BatchNorm provides regularization)
+            "mixup_alpha": 0.0,         # DISABLED: No mixup (BatchNorm provides regularization)
 
             # Classification settings
             "num_classes": 2,           # Buy (1) or Sell (0)

@@ -42,7 +42,7 @@ def test_lstm_fixes():
         recurrent_dropout=lstm_config.get("recurrent_dropout", 0.1),
         learning_rate=lstm_config["learning_rate"],
         batch_size=lstm_config["batch_size"],
-        epochs=10,  # Short test
+        epochs=20,  # Longer test to see variance reduction
         early_stopping_patience=lstm_config["early_stopping_patience"],
         use_batch_norm=lstm_config["use_batch_norm"],
         layer_norm=lstm_config.get("layer_norm", True),
