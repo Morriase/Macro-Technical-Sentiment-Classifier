@@ -606,7 +606,7 @@ class LSTMSequenceModel:
         X_scaled = self.scaler.transform(X)
 
         # Use lazy dataset for inference too
-        dataset = LazySequenceDataset(X_scaled, None, self.sequence_length)
+        dataset = LazySequenceDataset(X_scaled, None, y_magnitude=None, sequence_length=self.sequence_length)
         loader = DataLoader(dataset, batch_size=1024,
                             shuffle=False, num_workers=0)
 
@@ -648,7 +648,7 @@ class LSTMSequenceModel:
         X = X.astype(np.float32)
         X_scaled = self.scaler.transform(X)
 
-        dataset = LazySequenceDataset(X_scaled, None, self.sequence_length)
+        dataset = LazySequenceDataset(X_scaled, None, y_magnitude=None, sequence_length=self.sequence_length)
         loader = DataLoader(dataset, batch_size=1024,
                             shuffle=False, num_workers=0)
 
