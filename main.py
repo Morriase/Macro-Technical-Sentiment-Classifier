@@ -282,26 +282,49 @@ class ForexClassifierPipeline:
                     fred_macro_df = fred_macro_df[selected_cols]
 
                     # Merge with price features
-                    original_index_name = self.df_features.index.name or 'date'
+                    # CRITICAL: Preserve original datetime index (with time component)
+                    # Previous bug: converting to .dt.date lost time, making index non-unique
+                    # This caused 80K rows to explode to 7M+ during walk-forward indexing
+                    
+                    # Create a date-only column for merging, but keep original datetime index
+                    self.df_features['_merge_date'] = pd.to_datetime(self.df_features.index).normalize()
+                    fred_macro_df['_merge_date'] = pd.to_datetime(fred_macro_df['date']).dt.normalize()
+                    
+                    # Remove duplicate dates from FRED data
+                    if fred_macro_df['_merge_date'].duplicated().any():
+                        logger.warning(f"⚠ FRED data has {fred_macro_df['_merge_date'].duplicated().sum()} duplicate dates - deduplicating")
+                        fred_macro_df = fred_macro_df.drop_duplicates(subset=['_merge_date'], keep='last')
+                    
+                    # Store original row count to verify merge doesn't explode
+                    original_rows = len(self.df_features)
+                    original_index = self.df_features.index.copy()
+                    
+                    # Reset index for merge, but store original datetime
                     self.df_features = self.df_features.reset_index()
-
-                    if original_index_name != 'date' and original_index_name in self.df_features.columns:
-                        self.df_features = self.df_features.rename(columns={original_index_name: 'date'})
-
-                    self.df_features['date'] = pd.to_datetime(self.df_features['date']).dt.date
-                    fred_macro_df['date'] = pd.to_datetime(fred_macro_df['date']).dt.date
-
-                    self.df_features = pd.merge(self.df_features, fred_macro_df, on='date', how='left')
+                    
+                    # Merge on normalized date
+                    fred_cols = [col for col in fred_macro_df.columns if col not in ['date', '_merge_date']]
+                    fred_for_merge = fred_macro_df[['_merge_date'] + fred_cols]
+                    self.df_features = pd.merge(self.df_features, fred_for_merge, on='_merge_date', how='left')
+                    
+                    # Verify merge didn't create duplicates
+                    if len(self.df_features) != original_rows:
+                        logger.error(f"⚠ MERGE BUG: Row count changed from {original_rows} to {len(self.df_features)}")
+                        raise ValueError(f"Merge created duplicate rows: {original_rows} -> {len(self.df_features)}")
 
                     # Forward-fill macro features
-                    macro_cols = [col for col in fred_macro_df.columns if col != 'date']
+                    macro_cols = fred_cols
                     for col in macro_cols:
                         if col in self.df_features.columns:
                             self.df_features[col] = self.df_features[col].ffill().fillna(0)
 
-                    # Restore datetime index
-                    self.df_features['date'] = pd.to_datetime(self.df_features['date'])
-                    self.df_features = self.df_features.set_index('date')
+                    # Restore original datetime index (with time component!)
+                    index_col = self.df_features.columns[0]  # First column after reset_index
+                    self.df_features = self.df_features.set_index(index_col)
+                    self.df_features.index.name = 'date'
+                    
+                    # Clean up merge column
+                    self.df_features = self.df_features.drop(columns=['_merge_date'], errors='ignore')
 
                     logger.success(f"✓ Added 2 macro features: {', '.join(macro_cols)}")
                 else:
@@ -770,14 +793,14 @@ class ForexClassifierPipeline:
     def run_full_pipeline(
         self,
         years_history: int = 5,
-        use_walk_forward: bool = False,  # CHANGED: Default to simple training (WFO has bugs)
+        use_walk_forward: bool = True,
     ):
         """
         Run complete end-to-end pipeline
 
         Args:
             years_history: Years of historical data to fetch
-            use_walk_forward: Whether to use walk-forward optimization (disabled by default due to bugs)
+            use_walk_forward: Whether to use walk-forward optimization
         """
         logger.info("="*60)
         logger.info("FOREX CLASSIFIER PIPELINE - FULL EXECUTION")
@@ -845,10 +868,10 @@ def main():
         try:
             pipeline = ForexClassifierPipeline(currency_pair=pair)
 
-            # Run full pipeline (use_walk_forward=False for simple XGBoost training)
+            # Run full pipeline
             predictions = pipeline.run_full_pipeline(
                 years_history=5,
-                use_walk_forward=False,  # FIXED: Use simple training, WFO has data duplication bug
+                use_walk_forward=True,  # Walk-forward optimization (FRED merge bug fixed)
             )
 
             all_results[pair] = predictions
