@@ -148,7 +148,7 @@ ENSEMBLE_CONFIG = {
             # Architecture - OPTIMIZED FOR VARIANCE REDUCTION
             # Increased capacity with better regularization
             "sequence_length": 40,      # ZIGZAG: 40 bars (3.3 hours on M5)
-            "hidden_size": 32,          # INCREASED: More capacity for stable learning
+            "hidden_size": 64,          # INCREASED: More capacity for stable learning
             "num_layers": 2,            # INCREASED: 2 layers for better representation
             "bidirectional": False,     # Keep False for simplicity
             "hidden_activation": None,  # NO activation - LSTM gates provide non-linearity
@@ -159,8 +159,8 @@ ENSEMBLE_CONFIG = {
 
             # VARIANCE REDUCTION: BatchNorm + LayerNorm only (no dropout)
             "use_batch_norm": False,     # ENABLED - stabilizes training and provides regularization
-            "dropout": 0.1,             # DISABLED: Turn off dropout to reduce variance
-            "recurrent_dropout": 0.05,   # DISABLED: Turn off recurrent dropout
+            "dropout": 0.2,             # DISABLED: Turn off dropout to reduce variance
+            "recurrent_dropout": 0.1,   # DISABLED: Turn off recurrent dropout
             "layer_norm": True,         # ENABLED - Layer normalization for stability
 
             # Weight regularization - OPTIMIZED
