@@ -148,7 +148,7 @@ ENSEMBLE_CONFIG = {
             # Architecture - OPTIMIZED FOR VARIANCE REDUCTION
             # Increased capacity with better regularization
             "sequence_length": 40,      # ZIGZAG: 40 bars (3.3 hours on M5)
-            "hidden_size": 128,          # INCREASED: More capacity for stable learning
+            "hidden_size": 256,          # INCREASED: More capacity for stable learning
             "num_layers": 4,            # INCREASED: 2 layers for better representation
             "bidirectional": False,     # Keep False for simplicity
             "hidden_activation": None,  # NO activation - LSTM gates provide non-linearity
