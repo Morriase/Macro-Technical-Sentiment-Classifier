@@ -145,47 +145,61 @@ ENSEMBLE_CONFIG = {
             "num_class": 2,             # Changed from 3 to 2 (Buy/Sell)
         },
         "lstm": {
-            # Architecture - ZIGZAG APPROACH (Engineer's proven settings)
-            # Engineer used: 40 units, 40 sequence length → 65% accuracy
+            # Architecture - OPTIMIZED FOR VARIANCE REDUCTION
+            # Increased capacity with better regularization
             "sequence_length": 40,      # ZIGZAG: 40 bars (3.3 hours on M5)
-            "hidden_size": 40,          # ZIGZAG: Match sequence length
-            "num_layers": 1,            # Single layer - simpler = better generalization
-            "bidirectional": False,
+            "hidden_size": 64,          # INCREASED: More capacity for stable learning
+            "num_layers": 2,            # INCREASED: 2 layers for better representation
+            "bidirectional": False,     # Keep False for simplicity
             "hidden_activation": None,  # NO activation - LSTM gates provide non-linearity
 
             # Dual Output - ZIGZAG APPROACH
             "num_outputs": 2,           # Direction (classification) + Magnitude (regression)
             "output_types": ["classification", "regression"],
 
-            # Regularization - BALANCED for small datasets
+            # VARIANCE REDUCTION: Advanced Regularization
             "use_batch_norm": True,     # ENABLED - stabilizes training
-            "dropout": 0.3,             # REDUCED from 0.5 - too aggressive for small data
+            "dropout": 0.2,             # REDUCED: Lower dropout for more stable learning
+            "recurrent_dropout": 0.1,   # NEW: Dropout on recurrent connections
+            "layer_norm": True,         # NEW: Layer normalization for stability
 
-            # Weight regularization - MODERATE
-            "l1_lambda": 1e-5,          # Reduced - was too strong
-            "l2_lambda": 1e-3,          # Reduced from 5e-2 - was preventing learning
+            # Weight regularization - OPTIMIZED
+            "l1_lambda": 5e-6,          # REDUCED: Less aggressive L1
+            "l2_lambda": 5e-4,          # REDUCED: Balanced L2 regularization
+            "spectral_norm": True,      # NEW: Spectral normalization for stability
 
-            "label_smoothing": 0.1,     # Reduced from 0.15
+            "label_smoothing": 0.05,    # REDUCED: Less smoothing for better convergence
 
-            # Learning rate - HIGHER for faster convergence on small data
-            "learning_rate": 1e-3,      # Increased from 5e-5 - was way too low!
-            "lr_warmup_epochs": 5,      # Longer warmup for stability
-            "lr_min_factor": 0.01,      # Allow LR to decay more
+            # VARIANCE REDUCTION: Learning Rate Scheduling
+            "learning_rate": 5e-4,      # REDUCED: More conservative initial LR
+            "lr_scheduler": "cosine_annealing",  # NEW: Cosine annealing for smooth convergence
+            "lr_warmup_epochs": 10,     # INCREASED: Longer warmup for stability
+            "lr_min_factor": 0.001,     # REDUCED: Allow deeper LR decay
+            "lr_patience": 5,           # NEW: Reduce LR on plateau
 
-            # Training schedule - SMALLER BATCHES for small datasets
-            "batch_size": 512,          # Reduced from 16384 - better for 5K samples
-            "epochs": 200,              # Reduced - don't need 500
-            "early_stopping_patience": 20,  # More patience to find good solution
+            # VARIANCE REDUCTION: Training Schedule
+            "batch_size": 256,          # REDUCED: Smaller batches for more stable gradients
+            "epochs": 300,              # INCREASED: More epochs with better scheduling
+            "early_stopping_patience": 25,  # INCREASED: More patience for convergence
 
-            # Optimizer
+            # VARIANCE REDUCTION: Optimizer Settings
             "optimizer": "adamw",
             "beta1": 0.9,
             "beta2": 0.999,
-            "max_grad_norm": 1.0,       # Relaxed from 0.5
+            "eps": 1e-8,
+            "weight_decay": 1e-4,       # NEW: Weight decay for regularization
+            "max_grad_norm": 0.5,       # REDUCED: Stricter gradient clipping
+            "gradient_accumulation_steps": 2,  # NEW: Accumulate gradients for stability
 
-            # Classification (direction only - magnitude is regression)
+            # VARIANCE REDUCTION: Advanced Training Techniques
+            "use_ema": True,            # NEW: Exponential moving average of weights
+            "ema_decay": 0.999,         # EMA decay rate
+            "noise_std": 0.01,          # NEW: Small noise injection for regularization
+            "mixup_alpha": 0.1,         # NEW: Mixup augmentation for robustness
+
+            # Classification settings
             "num_classes": 2,           # Buy (1) or Sell (0)
-            "gradient_accumulation_steps": 1,
+            "class_weights": "balanced", # NEW: Handle class imbalance
         },
     },
     "meta_learner": {

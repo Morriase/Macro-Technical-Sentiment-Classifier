@@ -80,12 +80,15 @@ class LSTMSequenceClassifier(nn.Module):
     def __init__(
         self,
         input_size: int,
-        hidden_size: int = 40,
-        num_layers: int = 1,
+        hidden_size: int = 64,
+        num_layers: int = 2,
         num_classes: int = 2,
-        dropout: float = 0.3,
+        dropout: float = 0.2,
+        recurrent_dropout: float = 0.1,
         bidirectional: bool = False,
         use_batch_norm: bool = True,
+        layer_norm: bool = True,
+        spectral_norm: bool = True,
         hidden_activation: str = None,
         dual_output: bool = True,  # ZIGZAG: Enable dual output
     ):
@@ -97,13 +100,14 @@ class LSTMSequenceClassifier(nn.Module):
         self.num_classes = num_classes
         self.bidirectional = bidirectional
         self.use_batch_norm = use_batch_norm
+        self.layer_norm = layer_norm
         self.dual_output = dual_output
 
         # 1. Input BatchNorm - stabilizes training
         if use_batch_norm:
             self.input_bn = nn.BatchNorm1d(input_size)
 
-        # 2. LSTM layers
+        # 2. LSTM layers with recurrent dropout
         self.lstm = nn.LSTM(
             input_size=input_size,
             hidden_size=hidden_size,
@@ -113,23 +117,41 @@ class LSTMSequenceClassifier(nn.Module):
             bidirectional=bidirectional,
         )
 
-        # 3. Post-LSTM BatchNorm
+        # 3. Post-LSTM normalization
         fc_input_size = hidden_size * 2 if bidirectional else hidden_size
+        
         if use_batch_norm:
             self.lstm_bn = nn.BatchNorm1d(fc_input_size)
-
-        # 4. Dropout
-        self.dropout = nn.Dropout(dropout)
         
-        # 5. DUAL OUTPUT HEADS (ZIGZAG APPROACH)
+        if layer_norm:
+            self.layer_norm_layer = nn.LayerNorm(fc_input_size)
+
+        # 4. Dropout layers
+        self.dropout = nn.Dropout(dropout)
+        self.recurrent_dropout = nn.Dropout(recurrent_dropout) if recurrent_dropout > 0 else None
+        
+        # 5. DUAL OUTPUT HEADS (ZIGZAG APPROACH) with spectral normalization
         if dual_output:
             # Head 1: Direction (classification)
-            self.direction_head = nn.Linear(fc_input_size, num_classes)
+            direction_head = nn.Linear(fc_input_size, num_classes)
+            if spectral_norm:
+                self.direction_head = nn.utils.spectral_norm(direction_head)
+            else:
+                self.direction_head = direction_head
+                
             # Head 2: Magnitude (regression)
-            self.magnitude_head = nn.Linear(fc_input_size, 1)
+            magnitude_head = nn.Linear(fc_input_size, 1)
+            if spectral_norm:
+                self.magnitude_head = nn.utils.spectral_norm(magnitude_head)
+            else:
+                self.magnitude_head = magnitude_head
         else:
             # Single output (backward compatibility)
-            self.fc = nn.Linear(fc_input_size, num_classes)
+            fc_layer = nn.Linear(fc_input_size, num_classes)
+            if spectral_norm:
+                self.fc = nn.utils.spectral_norm(fc_layer)
+            else:
+                self.fc = fc_layer
         
         self.softmax = nn.Softmax(dim=1)
 
@@ -162,11 +184,18 @@ class LSTMSequenceClassifier(nn.Module):
         else:
             hidden = h_n[-1]
 
-        # Apply Post-LSTM BatchNorm
+        # Apply Post-LSTM normalization
         if self.use_batch_norm:
             hidden = self.lstm_bn(hidden)
+        
+        if self.layer_norm:
+            hidden = self.layer_norm_layer(hidden)
 
-        # Dropout
+        # Apply recurrent dropout if enabled
+        if self.recurrent_dropout is not None:
+            hidden = self.recurrent_dropout(hidden)
+
+        # Regular dropout
         hidden = self.dropout(hidden)
         
         # DUAL OUTPUT (ZIGZAG APPROACH)
@@ -209,25 +238,37 @@ class LSTMSequenceModel:
         input_size: int,
         sequence_length: int = 40,
         hidden_size: int = 64,
-        num_layers: int = 1,
+        num_layers: int = 2,
         num_classes: int = 2,
-        dropout: float = 0.3,
-        learning_rate: float = 1e-4,
-        batch_size: int = 128,
-        epochs: int = 500,
+        dropout: float = 0.2,
+        recurrent_dropout: float = 0.1,
+        learning_rate: float = 5e-4,
+        batch_size: int = 256,
+        epochs: int = 300,
         early_stopping_patience: int = 25,
         device: Optional[str] = None,
-        l1_lambda: float = 1e-7,
-        l2_lambda: float = 1e-3,
+        l1_lambda: float = 5e-6,
+        l2_lambda: float = 5e-4,
         beta1: float = 0.9,
         beta2: float = 0.999,
-        label_smoothing: float = 0.1,
-        lr_warmup_epochs: int = 5,
-        lr_min_factor: float = 0.01,
-        max_grad_norm: float = 1.0,
-        gradient_accumulation_steps: int = 1,
+        eps: float = 1e-8,
+        weight_decay: float = 1e-4,
+        label_smoothing: float = 0.05,
+        lr_scheduler: str = "cosine_annealing",
+        lr_warmup_epochs: int = 10,
+        lr_min_factor: float = 0.001,
+        lr_patience: int = 5,
+        max_grad_norm: float = 0.5,
+        gradient_accumulation_steps: int = 2,
         bidirectional: bool = False,
         use_batch_norm: bool = True,
+        layer_norm: bool = True,
+        spectral_norm: bool = True,
+        use_ema: bool = True,
+        ema_decay: float = 0.999,
+        noise_std: float = 0.01,
+        mixup_alpha: float = 0.1,
+        class_weights: str = "balanced",
         hidden_activation: str = None,
         **kwargs,
     ):
@@ -240,6 +281,7 @@ class LSTMSequenceModel:
         self.num_layers = num_layers
         self.num_classes = num_classes
         self.dropout = dropout
+        self.recurrent_dropout = recurrent_dropout
         self.learning_rate = learning_rate
         self.batch_size = batch_size
         self.epochs = epochs
@@ -248,7 +290,18 @@ class LSTMSequenceModel:
         self.l2_lambda = l2_lambda
         self.beta1 = beta1
         self.beta2 = beta2
+        self.eps = eps
+        self.weight_decay = weight_decay
         self.label_smoothing = label_smoothing
+        self.lr_scheduler = lr_scheduler
+        self.lr_patience = lr_patience
+        self.use_ema = use_ema
+        self.ema_decay = ema_decay
+        self.noise_std = noise_std
+        self.mixup_alpha = mixup_alpha
+        self.class_weights = class_weights
+        self.layer_norm = layer_norm
+        self.spectral_norm = spectral_norm
         self.lr_warmup_epochs = lr_warmup_epochs
         self.lr_min_factor = lr_min_factor
         self.max_grad_norm = max_grad_norm
@@ -265,15 +318,18 @@ class LSTMSequenceModel:
         self.dual_output = False  # DISABLED: Was causing Val Loss explosion
         # self.dual_output = ENSEMBLE_CONFIG.get('base_learners', {}).get('lstm', {}).get('num_outputs', 1) == 2
         
-        # Initialize model
+        # Initialize model with variance reduction features
         self.model = LSTMSequenceClassifier(
             input_size=input_size,
             hidden_size=hidden_size,
             num_layers=num_layers,
             num_classes=num_classes,
             dropout=dropout,
+            recurrent_dropout=recurrent_dropout,
             bidirectional=bidirectional,
             use_batch_norm=use_batch_norm,
+            layer_norm=layer_norm,
+            spectral_norm=spectral_norm,
             dual_output=self.dual_output,  # ZIGZAG: Enable dual output
         ).to(self.device)
 
@@ -297,6 +353,17 @@ class LSTMSequenceModel:
         self.train_accs = []
         self.val_accs = []
         self.best_state = None
+
+        # Variance reduction components
+        self.ema_model = None  # EMA model for stable predictions
+        if self.use_ema:
+            self.ema_model = self._create_ema_model()
+        
+        # Learning rate scheduler
+        self.scheduler = None
+        
+        # Class weights for imbalanced data
+        self.computed_class_weights = None
 
         # Log model info
         param_count = sum(p.numel() for p in self.model.parameters())
@@ -387,42 +454,34 @@ class LSTMSequenceModel:
             del X_val_scaled
             gc.collect()
 
-        # 3. Class Weights (handle imbalance)
-        y_np = np.array(y)
-        unique_classes = np.unique(y_np)
-        weights = compute_class_weight(
-            'balanced', classes=unique_classes, y=y_np)
-        full_weights = np.ones(self.num_classes, dtype=np.float32)
-        for cls, weight in zip(unique_classes, weights):
-            if int(cls) < self.num_classes:
-                full_weights[int(cls)] = weight
-        class_weights = torch.tensor(
-            full_weights, device=self.device, dtype=torch.float32)
-        logger.info(
-            f"Using dynamic class weights: {class_weights.cpu().numpy()}")
+        # 3. Class Weights (VARIANCE REDUCTION: Balanced class weights)
+        self.computed_class_weights = self._compute_class_weights(np.array(y))
+        logger.info(f"Using dynamic class weights: {self.computed_class_weights.cpu().numpy() if self.computed_class_weights is not None else 'None'}")
 
-        # 4. Loss & Optimizer
+        # 4. Loss & Optimizer (VARIANCE REDUCTION: Improved optimizer settings)
         # ZIGZAG: Dual loss functions
         criterion_direction = nn.CrossEntropyLoss(
-            weight=class_weights, label_smoothing=self.label_smoothing)
+            weight=self.computed_class_weights, label_smoothing=self.label_smoothing)
         criterion_magnitude = nn.MSELoss() if self.dual_output else None
         
         optimizer = optim.AdamW(
             self.model.parameters(),
             lr=self.learning_rate,
             betas=(self.beta1, self.beta2),
-            weight_decay=self.l2_lambda,
+            eps=self.eps,
+            weight_decay=self.weight_decay,
         )
 
-        # 5. Learning Rate Scheduler with Warmup
+        # 5. Learning Rate Scheduler (VARIANCE REDUCTION: Advanced scheduling)
+        num_training_steps = len(train_loader) * self.epochs
+        self.scheduler = self._create_lr_scheduler(optimizer, num_training_steps)
+        
+        # Warmup scheduler
         def lr_lambda(epoch):
             if epoch < self.lr_warmup_epochs:
                 return 0.5 + 0.5 * (epoch / self.lr_warmup_epochs)
-            else:
-                progress = (epoch - self.lr_warmup_epochs) / \
-                    max(1, self.epochs - self.lr_warmup_epochs)
-                return self.lr_min_factor + (1 - self.lr_min_factor) * (1 + np.cos(np.pi * progress)) / 2
-        scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+            return 1.0
+        warmup_scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
         # 6. Training Loop
         best_val_loss = float('inf')
@@ -447,6 +506,13 @@ class LSTMSequenceModel:
                     batch_y_dir = batch_y_dir.to(self.device, non_blocking=True)
                     batch_y_mag = None
 
+                # VARIANCE REDUCTION: Apply noise and mixup
+                batch_X = self._add_noise_to_inputs(batch_X)
+                if self.mixup_alpha > 0:
+                    batch_X, y_a, y_b, lam = self._mixup_data(batch_X, batch_y_dir, self.mixup_alpha)
+                else:
+                    y_a, y_b, lam = batch_y_dir, None, 1.0
+
                 optimizer.zero_grad()
 
                 # Forward pass (with optional AMP)
@@ -454,7 +520,12 @@ class LSTMSequenceModel:
                     with autocast('cuda'):
                         if self.dual_output:
                             dir_logits, mag_pred = self.model(batch_X)
-                            loss_dir = criterion_direction(dir_logits, batch_y_dir)
+                            # Handle mixup for direction loss
+                            if y_b is not None:
+                                loss_dir = lam * criterion_direction(dir_logits, y_a) + (1 - lam) * criterion_direction(dir_logits, y_b)
+                            else:
+                                loss_dir = criterion_direction(dir_logits, y_a)
+                            
                             if batch_y_mag is not None:
                                 loss_mag = criterion_magnitude(mag_pred, batch_y_mag)
                                 loss = loss_dir + 0.5 * loss_mag  # Weight magnitude less
@@ -462,7 +533,11 @@ class LSTMSequenceModel:
                                 loss = loss_dir
                         else:
                             outputs = self.model(batch_X)
-                            loss = criterion_direction(outputs, batch_y_dir)
+                            # Handle mixup for single output
+                            if y_b is not None:
+                                loss = lam * criterion_direction(outputs, y_a) + (1 - lam) * criterion_direction(outputs, y_b)
+                            else:
+                                loss = criterion_direction(outputs, y_a)
                         
                         if self.l1_lambda > 0:
                             l1_penalty = sum(p.abs().sum() for p in self.model.parameters())
@@ -477,7 +552,12 @@ class LSTMSequenceModel:
                 else:
                     if self.dual_output:
                         dir_logits, mag_pred = self.model(batch_X)
-                        loss_dir = criterion_direction(dir_logits, batch_y_dir)
+                        # Handle mixup for direction loss
+                        if y_b is not None:
+                            loss_dir = lam * criterion_direction(dir_logits, y_a) + (1 - lam) * criterion_direction(dir_logits, y_b)
+                        else:
+                            loss_dir = criterion_direction(dir_logits, y_a)
+                        
                         if batch_y_mag is not None:
                             loss_mag = criterion_magnitude(mag_pred, batch_y_mag)
                             loss = loss_dir + 0.5 * loss_mag  # Weight magnitude less
@@ -485,7 +565,11 @@ class LSTMSequenceModel:
                             loss = loss_dir
                     else:
                         outputs = self.model(batch_X)
-                        loss = criterion_direction(outputs, batch_y_dir)
+                        # Handle mixup for single output
+                        if y_b is not None:
+                            loss = lam * criterion_direction(outputs, y_a) + (1 - lam) * criterion_direction(outputs, y_b)
+                        else:
+                            loss = criterion_direction(outputs, y_a)
                     
                     if self.l1_lambda > 0:
                         l1_penalty = sum(p.abs().sum() for p in self.model.parameters())
@@ -568,7 +652,18 @@ class LSTMSequenceModel:
                 else:
                     patience_counter += 1
 
-            scheduler.step()
+            # VARIANCE REDUCTION: Update EMA model
+            if self.use_ema:
+                self._update_ema_model()
+
+            # VARIANCE REDUCTION: Advanced scheduler handling
+            if epoch < self.lr_warmup_epochs:
+                warmup_scheduler.step()
+            elif self.scheduler:
+                if self.lr_scheduler == "reduce_on_plateau" and val_loader:
+                    self.scheduler.step(avg_val_loss)
+                elif self.lr_scheduler == "cosine_annealing":
+                    self.scheduler.step()
 
             # Logging
             if val_loader:
@@ -610,7 +705,9 @@ class LSTMSequenceModel:
         loader = DataLoader(dataset, batch_size=1024,
                             shuffle=False, num_workers=0)
 
-        self.model.eval()
+        # VARIANCE REDUCTION: Use EMA model for more stable predictions
+        model_to_use = self.ema_model if (self.use_ema and self.ema_model is not None) else self.model
+        model_to_use.eval()
         all_probs = []
 
         with torch.no_grad():
@@ -618,11 +715,11 @@ class LSTMSequenceModel:
                 batch_X = batch_X.to(self.device)
 
                 # Handle DataParallel wrapper
-                if isinstance(self.model, nn.DataParallel):
-                    logits = self.model(batch_X)
+                if isinstance(model_to_use, nn.DataParallel):
+                    logits = model_to_use(batch_X)
                     probs = torch.softmax(logits, dim=1)
                 else:
-                    probs = self.model.predict_proba(batch_X)
+                    probs = model_to_use.predict_proba(batch_X)
 
                 all_probs.append(probs.cpu().numpy().astype(np.float32))
 
@@ -673,6 +770,63 @@ class LSTMSequenceModel:
 
         return np.vstack(all_hidden)
 
+    def _create_ema_model(self):
+        """Create EMA model for stable predictions."""
+        import copy
+        ema_model = copy.deepcopy(self.model)
+        for param in ema_model.parameters():
+            param.detach_()
+        return ema_model
+
+    def _update_ema_model(self):
+        """Update EMA model weights."""
+        if self.ema_model is None:
+            return
+        
+        with torch.no_grad():
+            for ema_param, param in zip(self.ema_model.parameters(), self.model.parameters()):
+                ema_param.data.mul_(self.ema_decay).add_(param.data, alpha=1 - self.ema_decay)
+
+    def _compute_class_weights(self, y: np.ndarray):
+        """Compute balanced class weights."""
+        if self.class_weights == "balanced":
+            from sklearn.utils.class_weight import compute_class_weight
+            classes = np.unique(y)
+            weights = compute_class_weight('balanced', classes=classes, y=y)
+            return torch.FloatTensor(weights).to(self.device)
+        return None
+
+    def _create_lr_scheduler(self, optimizer, num_training_steps):
+        """Create learning rate scheduler."""
+        if self.lr_scheduler == "cosine_annealing":
+            return torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer, T_max=num_training_steps, eta_min=self.learning_rate * self.lr_min_factor
+            )
+        elif self.lr_scheduler == "reduce_on_plateau":
+            return torch.optim.lr_scheduler.ReduceLROnPlateau(
+                optimizer, mode='min', factor=0.5, patience=self.lr_patience, verbose=True
+            )
+        return None
+
+    def _add_noise_to_inputs(self, x):
+        """Add small noise for regularization."""
+        if self.noise_std > 0 and self.model.training:
+            noise = torch.randn_like(x) * self.noise_std
+            return x + noise
+        return x
+
+    def _mixup_data(self, x, y, alpha=0.1):
+        """Apply mixup augmentation."""
+        if alpha > 0 and self.model.training:
+            lam = np.random.beta(alpha, alpha)
+            batch_size = x.size(0)
+            index = torch.randperm(batch_size).to(x.device)
+            
+            mixed_x = lam * x + (1 - lam) * x[index, :]
+            y_a, y_b = y, y[index]
+            return mixed_x, y_a, y_b, lam
+        return x, y, None, 1.0
+
     def save_model(self, path: str):
         """Save model state and scaler."""
         import joblib
@@ -688,8 +842,11 @@ class LSTMSequenceModel:
             'num_layers': self.num_layers,
             'num_classes': self.num_classes,
             'dropout': self.dropout,
+            'recurrent_dropout': self.recurrent_dropout,
             'bidirectional': self.bidirectional,
             'use_batch_norm': self.use_batch_norm,
+            'layer_norm': self.layer_norm,
+            'spectral_norm': self.spectral_norm,
         }, f"{path}_lstm.pt")
 
         # Save scaler
@@ -703,15 +860,18 @@ class LSTMSequenceModel:
         # Load checkpoint
         checkpoint = torch.load(f"{path}_lstm.pt", map_location=self.device)
 
-        # Reinitialize model with saved params
+        # Reinitialize model with saved params (with backward compatibility)
         self.model = LSTMSequenceClassifier(
             input_size=checkpoint['input_size'],
             hidden_size=checkpoint['hidden_size'],
             num_layers=checkpoint['num_layers'],
             num_classes=checkpoint['num_classes'],
             dropout=checkpoint['dropout'],
+            recurrent_dropout=checkpoint.get('recurrent_dropout', 0.1),
             bidirectional=checkpoint['bidirectional'],
             use_batch_norm=checkpoint['use_batch_norm'],
+            layer_norm=checkpoint.get('layer_norm', True),
+            spectral_norm=checkpoint.get('spectral_norm', True),
         ).to(self.device)
 
         self.model.load_state_dict(checkpoint['model_state_dict'])

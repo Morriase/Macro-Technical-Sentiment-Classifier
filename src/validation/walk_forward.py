@@ -353,9 +353,15 @@ class WalkForwardOptimizer:
             X_test = df.loc[test_idx, feature_columns].values
             y_test = df.loc[test_idx, target_column].values
             
-            # DEBUG: Log actual data shapes
-            logger.info(f"  X_train shape: {X_train.shape}, y_train shape: {y_train.shape}")
-            logger.info(f"  X_test shape: {X_test.shape}, y_test shape: {y_test.shape}")
+            # SANITY CHECK: Verify data extraction didn't explode
+            expected_train = len(train_idx)
+            expected_test = len(test_idx)
+            if X_train.shape[0] != expected_train:
+                raise ValueError(f"Data extraction bug: expected {expected_train} train rows, got {X_train.shape[0]}")
+            if X_test.shape[0] != expected_test:
+                raise ValueError(f"Data extraction bug: expected {expected_test} test rows, got {X_test.shape[0]}")
+            
+            logger.info(f"  Train: {X_train.shape[0]:,} samples, Test: {X_test.shape[0]:,} samples")
             
             # ZIGZAG: Extract magnitude target if available
             y_train_magnitude = None

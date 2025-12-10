@@ -682,13 +682,13 @@ class ForexClassifierPipeline:
         y_pred_proba = self.model.predict_proba(X_recent)
         y_pred = self.model.predict(X_recent)
 
-        # Create results DataFrame
+        # Create results DataFrame - ZIGZAG APPROACH: Only 2 classes (buy/sell)
         results = pd.DataFrame({
             "timestamp": features_recent.index,
             "close": features_recent["close"].values,
             "pred_buy_prob": y_pred_proba[:, 0],
             "pred_sell_prob": y_pred_proba[:, 1],
-            "pred_hold_prob": y_pred_proba[:, 2],
+            "pred_hold_prob": 1.0 - (y_pred_proba[:, 0] + y_pred_proba[:, 1]),  # Derived from buy/sell probs
             "predicted_class": y_pred,
         })
 
