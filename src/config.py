@@ -147,9 +147,9 @@ ENSEMBLE_CONFIG = {
         "lstm": {
             # Architecture - OPTIMIZED FOR VARIANCE REDUCTION
             # Increased capacity with better regularization
-            "sequence_length": 40,      # ZIGZAG: 40 bars (3.3 hours on M5)
-            "hidden_size": 128,         # DOUBLED: More capacity to learn patterns
-            "num_layers": 3,            # INCREASED: 3 layers for more representation power
+            "sequence_length": 60,      # ZIGZAG: 40 bars (3.3 hours on M5)
+            "hidden_size": 64,         # DOUBLED: More capacity to learn patterns
+            "num_layers": 2,            # INCREASED: 3 layers for more representation power
             "bidirectional": False,     # Keep False for simplicity
             "hidden_activation": None,  # NO activation - LSTM gates provide non-linearity
 
@@ -159,8 +159,8 @@ ENSEMBLE_CONFIG = {
 
             # ANTI-UNDERFITTING: Reduce regularization
             "use_batch_norm": False,     # Keep disabled for now
-            "dropout": 0.1,             # REDUCED: Less dropout to allow more learning
-            "recurrent_dropout": 0.05,  # REDUCED: Minimal recurrent dropout
+            "dropout": 0.2,             # REDUCED: Less dropout to allow more learning
+            "recurrent_dropout": 0.1,  # REDUCED: Minimal recurrent dropout
             "layer_norm": True,         # ENABLED - Layer normalization for stability
 
             # Weight regularization - REDUCED FOR UNDERFITTING
@@ -168,17 +168,17 @@ ENSEMBLE_CONFIG = {
             "l2_lambda": 1e-5,          # REDUCED: Less weight decay constraint
             "spectral_norm": True,      # NEW: Spectral normalization for stability
 
-            "label_smoothing": 0.05,    # REDUCED: Less smoothing for better convergence
+            "label_smoothing": 0.1,    # REDUCED: Less smoothing for better convergence
 
             # ANTI-UNDERFITTING: Higher Learning Rate
-            "learning_rate": 1e-3,      # INCREASED: Faster learning to combat underfitting
+            "learning_rate": 5e-4,      # INCREASED: Faster learning to combat underfitting
             "lr_scheduler": "cosine_annealing",  # NEW: Cosine annealing for smooth convergence
             "lr_warmup_epochs": 10,     # INCREASED: Longer warmup for stability
             "lr_min_factor": 0.001,     # REDUCED: Allow deeper LR decay
             "lr_patience": 5,           # NEW: Reduce LR on plateau
 
             # VARIANCE REDUCTION: Training Schedule
-            "batch_size": 256,          # REDUCED: Smaller batches for more stable gradients
+            "batch_size": 512,          # REDUCED: Smaller batches for more stable gradients
             "epochs": 300,              # INCREASED: More epochs with better scheduling
             "early_stopping_patience": 15,  # INCREASED: More patience for convergence
 
