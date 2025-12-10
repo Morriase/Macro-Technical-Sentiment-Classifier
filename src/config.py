@@ -158,9 +158,9 @@ ENSEMBLE_CONFIG = {
             "output_types": ["classification", "regression"],
 
             # VARIANCE REDUCTION: BatchNorm + LayerNorm only (no dropout)
-            "use_batch_norm": True,     # ENABLED - stabilizes training and provides regularization
-            "dropout": 0.0,             # DISABLED: Turn off dropout to reduce variance
-            "recurrent_dropout": 0.0,   # DISABLED: Turn off recurrent dropout
+            "use_batch_norm": False,     # ENABLED - stabilizes training and provides regularization
+            "dropout": 0.2,             # DISABLED: Turn off dropout to reduce variance
+            "recurrent_dropout": 0.1,   # DISABLED: Turn off recurrent dropout
             "layer_norm": True,         # ENABLED - Layer normalization for stability
 
             # Weight regularization - OPTIMIZED
