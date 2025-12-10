@@ -147,8 +147,8 @@ ENSEMBLE_CONFIG = {
         "lstm": {
             # Architecture - OPTIMIZED FOR VARIANCE REDUCTION
             # Increased capacity with better regularization
-            "sequence_length": 40,      # ZIGZAG: 40 bars (3.3 hours on M5)
-            "hidden_size": 64,          # INCREASED: More capacity for stable learning
+            "sequence_length": 20,      # ZIGZAG: 40 bars (3.3 hours on M5)
+            "hidden_size": 32,          # INCREASED: More capacity for stable learning
             "num_layers": 2,            # INCREASED: 2 layers for better representation
             "bidirectional": False,     # Keep False for simplicity
             "hidden_activation": None,  # NO activation - LSTM gates provide non-linearity
@@ -159,13 +159,13 @@ ENSEMBLE_CONFIG = {
 
             # VARIANCE REDUCTION: BatchNorm + LayerNorm only (no dropout)
             "use_batch_norm": False,     # ENABLED - stabilizes training and provides regularization
-            "dropout": 0.2,             # DISABLED: Turn off dropout to reduce variance
-            "recurrent_dropout": 0.1,   # DISABLED: Turn off recurrent dropout
+            "dropout": 0.3,             # DISABLED: Turn off dropout to reduce variance
+            "recurrent_dropout": 0.2,   # DISABLED: Turn off recurrent dropout
             "layer_norm": True,         # ENABLED - Layer normalization for stability
 
             # Weight regularization - OPTIMIZED
-            "l1_lambda": 5e-6,          # REDUCED: Less aggressive L1
-            "l2_lambda": 5e-4,          # REDUCED: Balanced L2 regularization
+            "l1_lambda": 1e-4,          # REDUCED: Less aggressive L1
+            "l2_lambda": 1e-3,          # REDUCED: Balanced L2 regularization
             "spectral_norm": True,      # NEW: Spectral normalization for stability
 
             "label_smoothing": 0.05,    # REDUCED: Less smoothing for better convergence
@@ -180,7 +180,7 @@ ENSEMBLE_CONFIG = {
             # VARIANCE REDUCTION: Training Schedule
             "batch_size": 256,          # REDUCED: Smaller batches for more stable gradients
             "epochs": 300,              # INCREASED: More epochs with better scheduling
-            "early_stopping_patience": 25,  # INCREASED: More patience for convergence
+            "early_stopping_patience": 15,  # INCREASED: More patience for convergence
 
             # VARIANCE REDUCTION: Optimizer Settings
             "optimizer": "adamw",
