@@ -355,10 +355,13 @@ class HybridEnsemble:
             feature_names: List of feature column names (CRITICAL for inference alignment)
             use_walk_forward: Whether to use walk-forward optimization (should only be True from main pipeline)
         """
-        # logger.info("Training Hybrid Ensemble")
-        # logger.info(f"Training samples: {len(X)}, Features: {X.shape[1]}")
-        logger.info(
-            f"Hybrid Ensemble fit: X.shape={X.shape}, y.shape={y.shape}")
+        # DEBUG: Log data shapes and check for issues
+        logger.info(f"Hybrid Ensemble fit: X.shape={X.shape}, y.shape={y.shape}")
+        
+        # Sanity check - data should not be this large
+        if X.shape[0] > 100000:
+            logger.warning(f"⚠ SUSPICIOUS: X has {X.shape[0]:,} samples - expected ~20-80K for M5 data")
+            logger.warning(f"  This may indicate data duplication or incorrect indexing")
 
         # Store feature metadata (CRITICAL for inference server validation)
         self.n_features_ = X.shape[1]

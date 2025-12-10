@@ -192,9 +192,10 @@ class WalkForwardOptimizer:
         Returns:
             Optimization metric value
         """
-        # Log trial start
+        # Log trial start with data shapes
         logger.info(
             f"  Trial {trial.number + 1}/{self.optuna_config['n_trials']}: Testing hyperparameters...")
+        logger.info(f"    X_train shape: {X_train.shape}, y_train shape: {y_train.shape}")
 
         # Suggest hyperparameters for XGBoost base learner
         xgb_params = {
@@ -352,6 +353,10 @@ class WalkForwardOptimizer:
             X_test = df.loc[test_idx, feature_columns].values
             y_test = df.loc[test_idx, target_column].values
             
+            # DEBUG: Log actual data shapes
+            logger.info(f"  X_train shape: {X_train.shape}, y_train shape: {y_train.shape}")
+            logger.info(f"  X_test shape: {X_test.shape}, y_test shape: {y_test.shape}")
+            
             # ZIGZAG: Extract magnitude target if available
             y_train_magnitude = None
             if 'target_magnitude_norm' in df.columns:
@@ -361,6 +366,9 @@ class WalkForwardOptimizer:
             val_size = int(len(X_train) * 0.2)
             X_train_opt, X_val = X_train[:-val_size], X_train[-val_size:]
             y_train_opt, y_val = y_train[:-val_size], y_train[-val_size:]
+            
+            # DEBUG: Log shapes after split
+            logger.info(f"  After nested split: X_train_opt.shape={X_train_opt.shape}, X_val.shape={X_val.shape}")
 
             # Hyperparameter optimization (if enabled)
             if optimize_each_window or best_params is None:
@@ -397,6 +405,9 @@ class WalkForwardOptimizer:
                 fold_plot_path = f"{save_plots_path}_fold{fold_idx + 1}"
 
             # Pass feature names for inference server alignment (CRITICAL!)
+            # DEBUG: Log data shapes before fit
+            logger.info(f"  Before model.fit: X_train.shape={X_train.shape}, y_train.shape={y_train.shape}")
+            
             # ZIGZAG: Pass magnitude target if available
             if y_train_magnitude is not None:
                 model.fit(X_train, y_train, y_magnitude=y_train_magnitude,

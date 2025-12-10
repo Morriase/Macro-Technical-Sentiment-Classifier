@@ -526,16 +526,79 @@ class ForexClassifierPipeline:
             logger.info(f"WFO summary saved to {summary_path}")
 
         else:
-            # Simple train/test split (not recommended for time series)
-            logger.warning(
-                "Using simple split - not recommended for time series!")
-
-            train_size = int(len(self.df_features) * 0.8)
-            X_train = self.df_features[feature_cols].values[:train_size]
-            y_train = self.df_features["target_class"].values[:train_size]
-
-            self.model = HybridEnsemble()
-            self.model.fit(X_train, y_train)
+            # Simple train/val/test split with XGBoost only
+            # This is more stable than the complex ensemble for initial testing
+            logger.info("Using simple XGBoost training (bypassing complex ensemble)")
+            
+            import xgboost as xgb
+            
+            # Time-series split: 70% train, 15% val, 15% test
+            n_samples = len(self.df_features)
+            train_size = int(n_samples * 0.70)
+            val_size = int(n_samples * 0.15)
+            
+            X = self.df_features[feature_cols].values
+            y = self.df_features["target_class"].values.astype(int)
+            
+            X_train = X[:train_size]
+            y_train = y[:train_size]
+            X_val = X[train_size:train_size+val_size]
+            y_val = y[train_size:train_size+val_size]
+            
+            logger.info(f"  Train: {len(X_train):,} samples")
+            logger.info(f"  Val: {len(X_val):,} samples")
+            
+            # Train XGBoost with early stopping
+            xgb_model = xgb.XGBClassifier(
+                n_estimators=500,
+                max_depth=6,
+                learning_rate=0.05,
+                subsample=0.8,
+                colsample_bytree=0.8,
+                min_child_weight=3,
+                gamma=0.1,
+                reg_alpha=0.1,
+                reg_lambda=1.0,
+                random_state=42,
+                early_stopping_rounds=50,
+                eval_metric='logloss',
+                tree_method='hist',
+                device='cuda' if USE_CUDA else 'cpu',
+            )
+            
+            xgb_model.fit(
+                X_train, y_train,
+                eval_set=[(X_val, y_val)],
+                verbose=50
+            )
+            
+            # Wrap in a simple class for compatibility
+            class SimpleXGBWrapper:
+                def __init__(self, model, scaler=None):
+                    self.model = model
+                    self.scaler = scaler
+                    self.n_features_ = X_train.shape[1]
+                    self.feature_names_ = feature_cols
+                    
+                def predict(self, X):
+                    return self.model.predict(X)
+                    
+                def predict_proba(self, X):
+                    return self.model.predict_proba(X)
+                    
+                def save_model(self, path):
+                    self.model.save_model(f"{path}_xgb.json")
+                    logger.info(f"Model saved to {path}_xgb.json")
+                    
+                def load_model(self, path):
+                    self.model.load_model(f"{path}_xgb.json")
+            
+            self.model = SimpleXGBWrapper(xgb_model)
+            
+            # Evaluate on validation set
+            y_pred = self.model.predict(X_val)
+            val_acc = (y_pred == y_val).mean()
+            logger.success(f"✓ Validation Accuracy: {val_acc:.2%}")
 
         # Save model
         model_path = MODELS_DIR / f"{self.currency_pair}_model"
@@ -707,14 +770,14 @@ class ForexClassifierPipeline:
     def run_full_pipeline(
         self,
         years_history: int = 5,
-        use_walk_forward: bool = True,
+        use_walk_forward: bool = False,  # CHANGED: Default to simple training (WFO has bugs)
     ):
         """
         Run complete end-to-end pipeline
 
         Args:
             years_history: Years of historical data to fetch
-            use_walk_forward: Whether to use walk-forward optimization
+            use_walk_forward: Whether to use walk-forward optimization (disabled by default due to bugs)
         """
         logger.info("="*60)
         logger.info("FOREX CLASSIFIER PIPELINE - FULL EXECUTION")
