@@ -259,6 +259,22 @@ class ForexClassifierPipeline:
         
         logger.success("✓ Calculated 3 base features: RSI, MACD_diff, Candle_body")
 
+        # --- VELOCITY FEATURES ---
+        # Velocity (rate of change) helps LSTM understand momentum, not just position
+        # RSI=70 + velocity=-5 means "overbought but crashing down" (reversal signal)
+        
+        # RSI Velocity: How fast is sentiment changing?
+        self.df_features['rsi_velocity'] = self.df_features['rsi_norm'].diff()
+        
+        # MACD Velocity: Is the trend accelerating or decelerating?
+        self.df_features['macd_velocity'] = self.df_features['macd_diff_norm'].diff()
+        
+        # Fill NaNs created by diff() (first row will be NaN)
+        self.df_features['rsi_velocity'] = self.df_features['rsi_velocity'].fillna(0)
+        self.df_features['macd_velocity'] = self.df_features['macd_velocity'].fillna(0)
+        
+        logger.success("✓ Added 2 velocity features: rsi_velocity, macd_velocity")
+
         # --- Macro Features (FRED - Only Yield Curve + DXY) ---
         if HAS_FRED and FREDMacroLoader is not None:
             logger.info(f"Fetching 2 macro features for {self.currency_pair}...")
@@ -350,8 +366,8 @@ class ForexClassifierPipeline:
         dropped = initial_len - len(self.df_features)
         
         logger.info(f"Dropped {dropped} rows with NaNs after feature engineering")
-        logger.success(f"✓ SIMPLIFIED FEATURES READY: 5 features, {len(self.df_features):,} samples")
-        logger.info(f"  Features: rsi_norm, macd_diff_norm, candle_body_norm, yield_curve, dxy_index")
+        logger.success(f"✓ SIMPLIFIED FEATURES READY: 7 features, {len(self.df_features):,} samples")
+        logger.info(f"  Features: rsi_norm, macd_diff_norm, candle_body_norm, rsi_velocity, macd_velocity, yield_curve, dxy_index")
 
     def create_target(
         self,
@@ -502,12 +518,14 @@ class ForexClassifierPipeline:
         if self.df_features is None or "target_class" not in self.df_features.columns:
             raise ValueError("Target not created. Run create_target() first.")
 
-        # Define feature columns - ZIGZAG APPROACH: 5 features only
-        # 3 base features + 2 macro features (proven by analysis)
+        # Define feature columns - ZIGZAG APPROACH: 7 features
+        # 3 base features + 2 velocity features + 2 macro features
         feature_cols = [
             'rsi_norm',
             'macd_diff_norm',
             'candle_body_norm',
+            'rsi_velocity',      # Rate of change of RSI (momentum signal)
+            'macd_velocity',     # Rate of change of MACD (trend acceleration)
             'yield_curve',
             'dxy_index'
         ]
@@ -665,11 +683,13 @@ class ForexClassifierPipeline:
         if self.model is None:
             raise ValueError("Model not trained. Run train_model() first.")
 
-        # Get feature columns - ZIGZAG APPROACH: 5 features only
+        # Get feature columns - ZIGZAG APPROACH: 7 features
         feature_cols = [
             'rsi_norm',
             'macd_diff_norm',
             'candle_body_norm',
+            'rsi_velocity',      # Rate of change of RSI (momentum signal)
+            'macd_velocity',     # Rate of change of MACD (trend acceleration)
             'yield_curve',
             'dxy_index'
         ]
