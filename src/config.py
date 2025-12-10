@@ -54,7 +54,7 @@ FRED_API_KEY = os.getenv("FRED_API_KEY", "")
 
 # Currency Pairs Configuration
 # First batch (training now)
-CURRENCY_PAIRS = ["EUR_USD"]
+CURRENCY_PAIRS = ["EUR_USD", "GPBUSD", "XAUUSD"]
 # Second batch (train later): ["XAU_USD", "USD_CAD", "USD_CHF", "NZD_USD"]
 
 PRIMARY_PAIR = "EUR_USD"  # Primary pair for training and evaluation
@@ -148,8 +148,8 @@ ENSEMBLE_CONFIG = {
             # Architecture - OPTIMIZED FOR VARIANCE REDUCTION
             # Increased capacity with better regularization
             "sequence_length": 40,      # ZIGZAG: 40 bars (3.3 hours on M5)
-            "hidden_size": 64,          # INCREASED: More capacity for stable learning
-            "num_layers": 2,            # INCREASED: 2 layers for better representation
+            "hidden_size": 128,          # INCREASED: More capacity for stable learning
+            "num_layers": 3,            # INCREASED: 2 layers for better representation
             "bidirectional": False,     # Keep False for simplicity
             "hidden_activation": None,  # NO activation - LSTM gates provide non-linearity
 
