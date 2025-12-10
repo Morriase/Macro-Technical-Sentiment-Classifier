@@ -845,10 +845,10 @@ def main():
         try:
             pipeline = ForexClassifierPipeline(currency_pair=pair)
 
-            # Run full pipeline
+            # Run full pipeline (use_walk_forward=False for simple XGBoost training)
             predictions = pipeline.run_full_pipeline(
                 years_history=5,
-                use_walk_forward=True,
+                use_walk_forward=False,  # FIXED: Use simple training, WFO has data duplication bug
             )
 
             all_results[pair] = predictions
