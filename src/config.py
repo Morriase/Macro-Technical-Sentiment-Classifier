@@ -54,7 +54,7 @@ FRED_API_KEY = os.getenv("FRED_API_KEY", "")
 
 # Currency Pairs Configuration
 # First batch (training now)
-CURRENCY_PAIRS = ["GPB_USD"]
+CURRENCY_PAIRS = ["GBP_USD"]
 # Second batch (train later): ["XAU_USD", "USD_CAD", "USD_CHF", "NZD_USD"]
 
 PRIMARY_PAIR = "GBP_USD"  # Primary pair for training and evaluation
