@@ -147,9 +147,9 @@ ENSEMBLE_CONFIG = {
         "lstm": {
             # Architecture - OPTIMIZED FOR VARIANCE REDUCTION
             # Increased capacity with better regularization
-            "sequence_length": 20,      # ZIGZAG: 40 bars (3.3 hours on M5)
-            "hidden_size": 32,          # INCREASED: More capacity for stable learning
-            "num_layers": 2,            # INCREASED: 2 layers for better representation
+            "sequence_length": 40,      # ZIGZAG: 40 bars (3.3 hours on M5)
+            "hidden_size": 128,         # DOUBLED: More capacity to learn patterns
+            "num_layers": 3,            # INCREASED: 3 layers for more representation power
             "bidirectional": False,     # Keep False for simplicity
             "hidden_activation": None,  # NO activation - LSTM gates provide non-linearity
 
@@ -157,21 +157,21 @@ ENSEMBLE_CONFIG = {
             "num_outputs": 2,           # Direction (classification) + Magnitude (regression)
             "output_types": ["classification", "regression"],
 
-            # VARIANCE REDUCTION: BatchNorm + LayerNorm only (no dropout)
-            "use_batch_norm": False,     # ENABLED - stabilizes training and provides regularization
-            "dropout": 0.3,             # DISABLED: Turn off dropout to reduce variance
-            "recurrent_dropout": 0.2,   # DISABLED: Turn off recurrent dropout
+            # ANTI-UNDERFITTING: Reduce regularization
+            "use_batch_norm": False,     # Keep disabled for now
+            "dropout": 0.1,             # REDUCED: Less dropout to allow more learning
+            "recurrent_dropout": 0.05,  # REDUCED: Minimal recurrent dropout
             "layer_norm": True,         # ENABLED - Layer normalization for stability
 
-            # Weight regularization - OPTIMIZED
-            "l1_lambda": 1e-4,          # REDUCED: Less aggressive L1
-            "l2_lambda": 1e-3,          # REDUCED: Balanced L2 regularization
+            # Weight regularization - REDUCED FOR UNDERFITTING
+            "l1_lambda": 1e-6,          # REDUCED: Allow more parameter freedom
+            "l2_lambda": 1e-5,          # REDUCED: Less weight decay constraint
             "spectral_norm": True,      # NEW: Spectral normalization for stability
 
             "label_smoothing": 0.05,    # REDUCED: Less smoothing for better convergence
 
-            # VARIANCE REDUCTION: Learning Rate Scheduling
-            "learning_rate": 5e-4,      # REDUCED: More conservative initial LR
+            # ANTI-UNDERFITTING: Higher Learning Rate
+            "learning_rate": 1e-3,      # INCREASED: Faster learning to combat underfitting
             "lr_scheduler": "cosine_annealing",  # NEW: Cosine annealing for smooth convergence
             "lr_warmup_epochs": 10,     # INCREASED: Longer warmup for stability
             "lr_min_factor": 0.001,     # REDUCED: Allow deeper LR decay
