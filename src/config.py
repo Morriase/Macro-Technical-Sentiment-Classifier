@@ -54,10 +54,11 @@ FRED_API_KEY = os.getenv("FRED_API_KEY", "")
 
 # Currency Pairs Configuration
 # First batch (training now)
-CURRENCY_PAIRS = ["EUR_USD", "USD_JPY", "GBP_USD"]
+#CURRENCY_PAIRS = ["EUR_USD", "USD_JPY", "GBP_USD"]
+CURRENCY_PAIRS = ["XAU_USD", "USD_CAD", "USD_CHF", "AUD_USD"]
 # Second batch (train later): ["XAU_USD", "USD_CAD", "USD_CHF", "NZD_USD"]
 
-PRIMARY_PAIR = "USD_JPY"  # Primary pair for training and evaluation
+PRIMARY_PAIR = "AUD_USD"  # Primary pair for training and evaluation
 
 # Data Acquisition Settings
 FX_DATA_GRANULARITY = "M5"  # 5-minute candles for high-fidelity
