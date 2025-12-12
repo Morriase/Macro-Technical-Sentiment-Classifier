@@ -847,6 +847,7 @@ class LSTMSequenceModel:
             'use_batch_norm': self.use_batch_norm,
             'layer_norm': self.layer_norm,
             'spectral_norm': self.spectral_norm,
+            'dual_output': self.dual_output, # NEW: Save the dual_output state
         }, f"{path}_lstm.pt")
 
         # Save scaler
@@ -872,6 +873,7 @@ class LSTMSequenceModel:
             use_batch_norm=checkpoint['use_batch_norm'],
             layer_norm=checkpoint.get('layer_norm', True),
             spectral_norm=checkpoint.get('spectral_norm', True),
+            dual_output=checkpoint.get('dual_output', False), # NEW: Load the dual_output state
         ).to(self.device)
 
         self.model.load_state_dict(checkpoint['model_state_dict'])

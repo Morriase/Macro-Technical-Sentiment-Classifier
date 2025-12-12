@@ -370,6 +370,161 @@ class TechnicalFeatureEngineer:
         return base_features + mtf_features
 
 
+def engineer_simplified_zigzag_features(df: pd.DataFrame, pair: str, fred_loader=None, skip_fred_warning: bool = False) -> tuple[pd.DataFrame, list]:
+    """
+    Engineer a simplified set of 7 features using the ZigZag approach,
+    matching the training pipeline exactly.
+
+    This is the single source of truth for feature engineering for the 7-feature model.
+
+    Features:
+    - 3 base technical features (rsi_norm, macd_diff_norm, candle_body_norm)
+    - 2 velocity features (rsi_velocity, macd_velocity)
+    - 2 FRED macro features (yield_curve, dxy_index)
+
+    Args:
+        df: OHLCV DataFrame (expects M5).
+        pair: Currency pair (e.g., 'EUR_USD').
+        fred_loader: An initialized FREDMacroLoader object. If None, macro features
+                     will be filled with placeholders.
+        skip_fred_warning: If True, suppress warning when fred_loader is None
+                          (useful when macro features are added separately).
+
+    Returns:
+        A tuple containing:
+        - df_features: DataFrame with the engineered features.
+        - feature_cols: List of engineered feature column names.
+    """
+    logger.info(
+        f"Engineering simplified features for {pair} from {len(df)} candles")
+
+    df_features = df.copy()
+
+    # --- 1. Base technical features ---
+    logger.debug("Calculating 3 base technical features...")
+    df_features['rsi_12'] = talib.RSI(df_features['close'], timeperiod=12)
+    df_features['rsi_norm'] = (df_features['rsi_12'] - 50.0) / 50.0
+
+    macd, macd_signal, _ = talib.MACD(
+        df_features['close'],
+        fastperiod=12,
+        slowperiod=48,
+        signalperiod=12
+    )
+    macd_diff = np.abs(macd - macd_signal)
+    macd_mean = macd_diff.mean() if not macd_diff.empty else 0.0
+    macd_std = macd_diff.std() if not macd_diff.empty and macd_diff.std() != 0 else 1.0
+    df_features['macd_diff_norm'] = ((macd_diff - macd_mean) / (macd_std * 3)).clip(-1, 1)
+
+    candle_body = df_features['close'] - df_features['open']
+    body_mean = candle_body.mean() if not candle_body.empty else 0.0
+    body_std = candle_body.std() if not candle_body.empty and candle_body.std() != 0 else 1.0
+    df_features['candle_body_norm'] = ((candle_body - body_mean) / (body_std * 3)).clip(-1, 1)
+
+    logger.debug("✓ Calculated 3 base features")
+
+    # --- 2. Velocity features ---
+    df_features['rsi_velocity'] = df_features['rsi_norm'].diff().fillna(0)
+    df_features['macd_velocity'] = df_features['macd_diff_norm'].diff().fillna(0)
+    logger.debug("✓ Added 2 velocity features")
+
+    # --- 3. Macro features (FRED ONLY: yield_curve, dxy_index) ---
+    if fred_loader is not None:
+        logger.debug(f"Fetching FRED macro features for {pair}...")
+        try:
+            start_date = df_features.index.min().to_pydatetime()
+            end_date = df_features.index.max().to_pydatetime()
+
+            fred_macro_df = fred_loader.get_macro_features_for_pair(
+                pair, start_date, end_date
+            )
+
+            if not fred_macro_df.empty:
+                key_fred_features = ['yield_curve', 'dxy_index']
+                selected_cols = ['date'] + [col for col in key_fred_features if col in fred_macro_df.columns]
+                fred_macro_df = fred_macro_df[selected_cols]
+
+                original_index_name = df_features.index.name or 'timestamp'
+                df_features['_merge_date'] = pd.to_datetime(df_features.index).normalize()
+                fred_macro_df['_merge_date'] = pd.to_datetime(fred_macro_df['date']).dt.normalize()
+                
+                if fred_macro_df['_merge_date'].duplicated().any():
+                    fred_macro_df = fred_macro_df.drop_duplicates(subset=['_merge_date'], keep='last')
+
+                original_rows = len(df_features)
+                df_features = df_features.reset_index(names=[original_index_name])
+
+                fred_cols_to_merge = [col for col in fred_macro_df.columns if col not in ['date', '_merge_date']]
+                fred_for_merge = fred_macro_df[['_merge_date'] + fred_cols_to_merge]
+                df_features = pd.merge(df_features, fred_for_merge, on='_merge_date', how='left')
+
+                if len(df_features) != original_rows:
+                    logger.error(f"MERGE BUG after FRED: Row count changed from {original_rows} to {len(df_features)}")
+                    raise ValueError(f"Merge created duplicate rows: {original_rows} -> {len(df_features)}")
+
+                macro_cols = fred_cols_to_merge
+                for col in macro_cols:
+                    if col in df_features.columns:
+                        df_features[col] = df_features[col].ffill().fillna(0)
+
+                df_features = df_features.set_index(original_index_name)
+                df_features = df_features.drop(columns=['_merge_date'], errors='ignore')
+
+                logger.debug(f"✓ Added {len(macro_cols)} FRED macro features: {macro_cols}")
+                
+                # Ensure yield_curve and dxy_index exist (may not be in merged cols)
+                if 'yield_curve' not in df_features.columns:
+                    df_features['yield_curve'] = 0.0
+                    logger.warning("yield_curve not in FRED data, using placeholder")
+                if 'dxy_index' not in df_features.columns:
+                    df_features['dxy_index'] = 100.0
+                    logger.warning("dxy_index not in FRED data, using placeholder")
+            else:
+                logger.warning("No FRED data available - adding placeholders for yield_curve, dxy_index")
+                df_features['yield_curve'] = 0.0
+                df_features['dxy_index'] = 100.0
+        except Exception as e:
+            logger.warning(f"⚠ Failed to fetch FRED macro features: {e}. Using placeholders.")
+            df_features['yield_curve'] = 0.0
+            df_features['dxy_index'] = 100.0
+    else:
+        if not skip_fred_warning:
+            logger.warning("No FRED loader available - adding placeholders for yield_curve, dxy_index")
+        df_features['yield_curve'] = 0.0
+        df_features['dxy_index'] = 100.0
+    
+    # Final safety check - ensure both macro features exist
+    if 'yield_curve' not in df_features.columns:
+        df_features['yield_curve'] = 0.0
+    if 'dxy_index' not in df_features.columns:
+        df_features['dxy_index'] = 100.0
+
+    # Drop NaN from initial feature calcs
+    initial_len = len(df_features)
+    df_features.dropna(inplace=True)
+    logger.debug(f"Dropped {initial_len - len(df_features)} rows with NaNs")
+
+    feature_cols = [
+        'rsi_norm',
+        'macd_diff_norm',
+        'candle_body_norm',
+        'rsi_velocity',
+        'macd_velocity',
+        'yield_curve',
+        'dxy_index'
+    ]
+    
+    missing_cols = [col for col in feature_cols if col not in df_features.columns]
+    if missing_cols:
+        raise ValueError(f"Feature engineering failed to create required columns: {missing_cols}")
+        
+    df_features = df_features[feature_cols + [c for c in df_features.columns if c not in feature_cols and c not in ['rsi_12']]]
+
+    logger.info(f"Engineered {len(feature_cols)} features, {len(df_features)} samples after dropna")
+
+    return df_features, feature_cols
+
+
 if __name__ == "__main__":
     # Example usage
     from src.data_acquisition.fx_data import FXDataAcquisition

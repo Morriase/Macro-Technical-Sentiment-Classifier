@@ -104,37 +104,38 @@ input group "+++ Verify source +++"
 input group "++++ LICENCING +++"
 
    input string LicenseKey = "";   // User-provided license key
-   input bool DebugMode = true;    // Enable/disable debug logging
+         bool DebugMode = true;    // Enable/disable debug logging
 
 input group "/--- Input Parameters ---/"
 
-   input string            RestServerURL =  "https://morriase-forex-live-server.hf.space/predict";   // API URL
+   //input string            RestServerURL =  "https://morriase-forex-live-server.hf.space/predict";   // API URL
+   input string            RestServerURL =  "http://localhost:5000/predict";   // API URL
    input long              inpMagic = 123456;                                 // EA magic number
-   input IntervalTime      UpdateIntervalSeconds = 0;                         // Update interval
-   input int               updateSeconds = 10;                                // Update interval in Seconds if "Every X Seconds" selected
+         IntervalTime      UpdateIntervalSeconds = 0;                         // Update interval
+         int               updateSeconds = 10;                                // Update interval in Seconds if "Every X Seconds" selected
    input double            MinConfidence = 0.55;                              // Minimum confidence
    
 input group "/--- Stop Loss & Take Profit Settings ---/"
    input StopLossMode      SLMode = atrBased;                                 // Stop loss calculation mode
    input bool              UseAdaptiveATR = true;                             // Use adaptive ATR multiplier based on volatility
-   input double            ATRMultiplierLow = 2.0;                            // ATR multiplier for LOW volatility (calm markets)
-   input double            ATRMultiplierMedium = 2.5;                         // ATR multiplier for MEDIUM volatility (normal)
-   input double            ATRMultiplierHigh = 3.5;                           // ATR multiplier for HIGH volatility (trending/news)
+         double            ATRMultiplierLow = 2.5;                            // ATR multiplier for LOW volatility (calm markets)
+         double            ATRMultiplierMedium = 3.0;                         // ATR multiplier for MEDIUM volatility (normal)
+         double            ATRMultiplierHigh = 3.5;                           // ATR multiplier for HIGH volatility (trending/news)
    input int               ATRPeriod = 14;                                    // ATR period (14 = standard, 7 = sensitive, 21 = smooth)
-   input int               ATRVolatilityPeriod = 50;                          // Period to measure volatility regime (50 bars)
+         int               ATRVolatilityPeriod = 50;                          // Period to measure volatility regime (50 bars)
    input int               StopLossPips = 50;                                 // Stop loss in pips (if fixedPips mode)
    input double            SLPercentage = 0.5;                                // SL as % of price (if percentage mode)
    input double            MinRiskReward = 2.0;                               // Minimum R:R ratio
-   input bool              EnableTrading = false;                             // Enable actual trading
-   input bool              ShowDebugInfo = true;                              // Show debug logs
-   input bool              PredictOnStart = true;                             // Make prediction on EA start
+         bool              EnableTrading = true;                             // Enable actual trading
+         bool              ShowDebugInfo = true;                              // Show debug logs
+         bool              PredictOnStart = true;                             // Make prediction on EA start
    input ENUM_TIMEFRAMES   AnalysisTimeframe = PERIOD_M5;                    // Timeframe for analysis (ATR, trailing stops)
    
 input group "/--- Trailing Stoploss params ---/"  
    input SLType   SLT = 0;                         // Use Trailing stoploss (TSL)? (No = Fixed Stoploss)
    input TrType   trailType = 0;                   // If using TSL, what type of TSL? 
    input int      BarsN = 20;                      // Number of bars to scan for highs and lows
-   input int      HighLowBuffer = 3;               // Buffer from prev low or high to trail (If selected) 
+         int      HighLowBuffer = 3;               // Buffer from prev low or high to trail (If selected) 
    input int      trailFixedpips = 10;             // Number of pips to trail SL (If option is selected)
    input double   TslPercent = 1.0;                // Percentage of ptice to TSL
    input double   TslPercentTP = 50.0;             // start TSL at x% from TP
@@ -147,11 +148,11 @@ input group "/--- Risk & Order Management Inputs ---/"
    input bool     EnableCompensatory = true;                         // Enable recovery multiplier after losing trades
    input int      RecoveryDepth = 3;                                 // Max consecutive recovery steps
    input double   RecoveryMultiplier = 1.5;                          // Multiplier per recovery step
-   input bool     EnableMarginCheck = false;                         // Enable margin safety check
-   input double   MaxMarginPercent = 50.0;                           // Maximum margin usage (% of balance, if enabled)
-   input double   ConfidenceHigh = 0.80;                             // High confidence threshold
-   input double   ConfidenceMed = 0.70;                              // Medium confidence threshold
-   input double   ConfidenceLow = 0.55;                              // Low confidence threshold
+         bool     EnableMarginCheck = false;                         // Enable margin safety check
+         double   MaxMarginPercent = 50.0;                           // Maximum margin usage (% of balance, if enabled)
+         double   ConfidenceHigh = 0.80;                             // High confidence threshold
+         double   ConfidenceMed = 0.70;                              // Medium confidence threshold
+         double   ConfidenceLow = 0.55;                              // Low confidence threshold
 
 // Hard-coded risk parameters (for safety)
 #define BASE_RISK_PERCENT 0.5    // Base risk: 0.5% per trade (systemRisk mode)
@@ -164,8 +165,8 @@ input group "/--- Core functions news ---/"
    input int                   StartTradingMin = 30;  // Minimum minutes to wait after news
    input SeparatorSymbol       separator = 0;        // 0=comma,1=semicolon for news keys
    input string                keyNews = "NFP,Non-Farm,Interest Rate,FOMC,CPI,GDP,Unemployment,Retail Sales,PMI,Central Bank,Fed,ECB,BoE,BoJ";        // Comma/semicolon separated list of news keywords
-   input string                NewsCurrencies = "USD,EUR,GBP,JPY,AUD,CAD,CHF,NZD";                                                                      // Comma-separated currencies to monitor
-   input int                   DaysNewsLookup = 2;   // How many days ahead to look for calendar events
+   input string                NewsCurrencies = "USD,EUR";                                                                      // Comma-separated currencies to monitor
+         int                   DaysNewsLookup = 100;   // How many days ahead to look for calendar events
    input int                   StopBeforeMin = 30;   // Minutes before news to avoid trading
    ushort sep_code;
 
@@ -220,7 +221,6 @@ string smcRegime = "";
 //--- Trade logging
 string logFileName = "BlackIce_Trades.csv";
 
-
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
 //+------------------------------------------------------------------+
@@ -239,9 +239,9 @@ int OnInit(){
    Print("HYBRID ENSEMBLE EA - MACRO-TECHNICAL SENTIMENT");
    Print("========================================");
    Print("Server: ", RestServerURL);
-   Print("Timeframe: M5 (5-minute candles)");
-   Print("Bars: 250 (for feature engineering)");
-   Print("Features: 58 (55 Technical + 3 Macro)");
+   Print("Timeframe: M5 + H1 + H4 (multi-timeframe)");
+   Print("Bars: M5=500, H1=300, H4=250");
+   Print("Server: Quality scoring + position sizing");
    Print("Chart Timeframe: ", EnumToString(PERIOD_CURRENT));
    
    if(UpdateIntervalSeconds == 0)
@@ -641,103 +641,79 @@ string ConvertSymbolFormat(string symbol)
 void ParseAndExecute(string response)
 {
    // ============================================================================
-   // SERVER-SIDE FILTERING (v2.0 - Quality + Session Filters)
+   // SERVER RESPONSE FORMAT (v3.0 - Quality Scoring)
    // ============================================================================
-   // The server now applies TWO layers of filtering before sending signals:
-   //
-   // 1. QUALITY FILTER:
-   //    - OB_Displacement > 1.5 ATR (strong institutional move)
-   //    - OB_Quality > 0.3 (good structure characteristics)
-   //    - Increases win rate from 51% → 63%
-   //
-   // 2. SESSION FILTER:
-   //    - Optimal hours: 7, 9, 10, 13, 14, 19, 20 UTC (>55% historical WR)
-   //    - Avoids: 0, 1, 8, 15, 17 UTC (<45% historical WR)
-   //    - Increases win rate from 63% → 68%
-   //
-   // RESULT: Server only sends BUY/SELL for high-probability setups
-   //         Most signals will be HOLD (70-80% filtered)
-   //         Expected win rate: ~68% (vs 51% unfiltered)
-   //
-   // EA's role: Execute server signals with proper risk management
+   // {
+   //   "prediction": "BUY",           // Final signal (HOLD if quality_filtered)
+   //   "raw_prediction": "BUY",       // Original model output before filtering
+   //   "confidence": 0.85,            // Model confidence for predicted class
+   //   "probabilities": {"BUY": 0.85, "SELL": 0.15},  // Binary classification
+   //   "quality_score": 75.5,         // Overall quality (0-100)
+   //   "quality_components": {...},   // Breakdown of quality factors
+   //   "position_size_pct": 1.0,      // Suggested position size multiplier
+   //   "quality_filtered": false,     // True if signal was filtered to HOLD
+   //   "status": "success"
+   // }
    // ============================================================================
    
    // Check for error in response
    if(StringFind(response, "\"error\":") >= 0)
    {
-      string errorMsg = ExtractString(response, "\"message\":\"", "\"");
+      string errorMsg = ExtractString(response, "\"error\":\"", "\"");
+      if(errorMsg == "") errorMsg = ExtractString(response, "\"message\":\"", "\"");
       Print("SERVER ERROR: ", errorMsg);
       return;
    }
    
-   // Parse inference server response format:
-   // {"prediction": "BUY", "confidence": 0.85, "probabilities": {"SELL": 0.05, "HOLD": 0.10, "BUY": 0.85}}
-   
+   // Parse response fields
    string signal = "";
+   string rawSignal = "";
    double confidence = 0.0;
    double prob_sell = 0.0;
-   double prob_hold = 0.0;
    double prob_buy = 0.0;
+   double qualityScore = 0.0;
+   double positionSizePct = 1.0;
+   bool qualityFiltered = false;
    
-   // Extract prediction (signal)
-   signal = ExtractString(response, "\"prediction\":\"", "\"");
+   // Extract prediction (final signal - may be HOLD if quality filtered)
+   // Note: Flask JSON has spaces after colons, so we use patterns that handle both
+   signal = ExtractJsonString(response, "prediction");
+   
+   // Extract raw_prediction (original model output)
+   rawSignal = ExtractJsonString(response, "raw_prediction");
+   if(rawSignal == "") rawSignal = signal;  // Fallback for compatibility
    
    if(ShowDebugInfo && signal != "")
-      Print("Extracted prediction: ", signal);
+      Print("Extracted prediction: ", signal, " (raw: ", rawSignal, ")");
    
    // Extract confidence
-   int confPos = StringFind(response, "\"confidence\":");
-   if(confPos >= 0)
-   {
-      int confEnd = StringFind(response, ",", confPos);
-      if(confEnd < 0) confEnd = StringFind(response, "}", confPos);
-      string confStr = StringSubstr(response, confPos + 13, confEnd - confPos - 13);
-      confidence = StringToDouble(confStr);
-      
-      if(ShowDebugInfo)
-         Print("Extracted confidence: ", confidence);
-   }
+   confidence = ExtractJsonDouble(response, "confidence");
    
-   // Extract probabilities from nested object
-   int probStartPos = StringFind(response, "\"probabilities\":{");
+   // Extract quality_score
+   qualityScore = ExtractJsonDouble(response, "quality_score");
+   
+   // Extract position_size_pct (server's suggested position sizing)
+   positionSizePct = ExtractJsonDouble(response, "position_size_pct");
+   
+   // Extract quality_filtered
+   qualityFiltered = ExtractJsonBool(response, "quality_filtered");
+   
+   // Extract probabilities (now binary: BUY/SELL only)
+   // Find the probabilities object and extract values
+   int probStartPos = StringFind(response, "\"probabilities\":");
    if(probStartPos >= 0)
    {
-      // Find the end of probabilities object
-      int probEndPos = StringFind(response, "}", probStartPos);
-      string probSection = StringSubstr(response, probStartPos, probEndPos - probStartPos + 1);
-      
-      // Extract SELL probability
-      int sellPos = StringFind(probSection, "\"SELL\":");
-      if(sellPos >= 0)
+      int probObjStart = StringFind(response, "{", probStartPos);
+      int probObjEnd = StringFind(response, "}", probObjStart);
+      if(probObjStart >= 0 && probObjEnd > probObjStart)
       {
-         int sellEnd = StringFind(probSection, ",", sellPos);
-         if(sellEnd < 0) sellEnd = StringFind(probSection, "}", sellPos);
-         string sellStr = StringSubstr(probSection, sellPos + 7, sellEnd - sellPos - 7);
-         prob_sell = StringToDouble(sellStr);
-      }
-      
-      // Extract HOLD probability
-      int holdPos = StringFind(probSection, "\"HOLD\":");
-      if(holdPos >= 0)
-      {
-         int holdEnd = StringFind(probSection, ",", holdPos);
-         if(holdEnd < 0) holdEnd = StringFind(probSection, "}", holdPos);
-         string holdStr = StringSubstr(probSection, holdPos + 7, holdEnd - holdPos - 7);
-         prob_hold = StringToDouble(holdStr);
-      }
-      
-      // Extract BUY probability
-      int buyPos = StringFind(probSection, "\"BUY\":");
-      if(buyPos >= 0)
-      {
-         int buyEnd = StringFind(probSection, ",", buyPos);
-         if(buyEnd < 0) buyEnd = StringFind(probSection, "}", buyPos);
-         string buyStr = StringSubstr(probSection, buyPos + 6, buyEnd - buyPos - 6);
-         prob_buy = StringToDouble(buyStr);
+         string probSection = StringSubstr(response, probObjStart, probObjEnd - probObjStart + 1);
+         prob_buy = ExtractJsonDouble(probSection, "BUY");
+         prob_sell = ExtractJsonDouble(probSection, "SELL");
       }
       
       if(ShowDebugInfo)
-         Print("Extracted probabilities - SELL: ", prob_sell, ", HOLD: ", prob_hold, ", BUY: ", prob_buy);
+         Print("Extracted probabilities - SELL: ", prob_sell, ", BUY: ", prob_buy);
    }
    
    // Display results
@@ -745,53 +721,131 @@ void ParseAndExecute(string response)
    if(predLabel == "") predLabel = "HOLD"; // Default if parsing failed
    
    Print("========================================");
-   Print("HYBRID ENSEMBLE PREDICTION: ", predLabel);
+   Print("PREDICTION: ", predLabel, (qualityFiltered ? " (filtered from " + rawSignal + ")" : ""));
    Print("Confidence: ", DoubleToString(confidence * 100, 1), "%");
-   Print("Probabilities:");
-   Print("  SELL: ", DoubleToString(prob_sell * 100, 1), "%");
-   Print("  HOLD: ", DoubleToString(prob_hold * 100, 1), "%");
-   Print("  BUY:  ", DoubleToString(prob_buy * 100, 1), "%");
+   Print("Quality Score: ", DoubleToString(qualityScore, 1), "/100");
+   Print("Position Size: ", DoubleToString(positionSizePct * 100, 0), "%");
+   Print("Probabilities: BUY=", DoubleToString(prob_buy * 100, 1), "% | SELL=", DoubleToString(prob_sell * 100, 1), "%");
    Print("========================================");
    
-   // Display on chart with color coding
-   DisplayPredictionInfo(predLabel, confidence, prob_sell, prob_hold, prob_buy);
+   // Display on chart (binary classification: BUY/SELL only)
+   DisplayPredictionInfo(predLabel, confidence, prob_sell, prob_buy);
    
-   // Convert string signal to numeric prediction for trading logic
+   // Convert string signal to numeric prediction
    // BUY = 1, SELL = -1, HOLD = 0
    int prediction = 0;
    if(predLabel == "BUY") prediction = 1;
    else if(predLabel == "SELL") prediction = -1;
    else if(predLabel == "HOLD") prediction = 0;
    
-   // Check for exit signals first (always active)
-   if(EnableTrading)
-   {
-      CheckExitSignals(prediction, confidence);
-   }
+   // DISABLED: Don't exit positions on opposing signals
+   // Let trades run to SL/TP - prevents greedy churning
+   // if(EnableTrading)
+   // {
+   //    CheckExitSignals(prediction, confidence);
+   // }
    
-   // Execute trade if confidence is sufficient AND conditions are good
-   // NOTE: With server's quality+session filters, you should see:
-   //       - 70-80% HOLD signals (filtered setups)
-   //       - 20-30% BUY/SELL signals (high-quality setups only)
-   //       - ~68% win rate on executed trades (vs 51% without filters)
-   
-   if(confidence >= MinConfidence && EnableTrading)
+   // Execute trade if conditions are met
+   // Server handles quality filtering - if prediction is HOLD, it was filtered
+   if(confidence >= MinConfidence && EnableTrading && prediction != 0)
    {
       if(IsGoodTradingCondition())
       {
-         Print("✅ EXECUTING: Server-approved high-quality setup");
-         ExecuteTrade(prediction, confidence);
+         Print("✅ EXECUTING: Quality=", DoubleToString(qualityScore, 1), " | Size=", DoubleToString(positionSizePct * 100, 0), "%");
+         ExecuteTrade(prediction, confidence, positionSizePct);
       }
+   }
+   else if(qualityFiltered)
+   {
+      Print("⏸️ FILTERED: Raw signal ", rawSignal, " filtered to HOLD (quality: ", DoubleToString(qualityScore, 1), ")");
    }
    else if(confidence < MinConfidence)
    {
-      Print("SKIPPED: Confidence ", DoubleToString(confidence * 100, 1), "% below minimum ", DoubleToString(MinConfidence * 100, 0), "%");
-      Print("   (Consider lowering MinConfidence to 0.50 with new server filters)");
+      Print("⏸️ SKIPPED: Confidence ", DoubleToString(confidence * 100, 1), "% < ", DoubleToString(MinConfidence * 100, 0), "%");
    }
 }
 
 //+------------------------------------------------------------------+
-//| Extract string value from JSON                                   |
+//| Extract JSON string value (handles spaces after colon)           |
+//+------------------------------------------------------------------+
+string ExtractJsonString(string json, string fieldName)
+{
+   // Look for "fieldName": "value" or "fieldName":"value"
+   string pattern = "\"" + fieldName + "\":";
+   int pos = StringFind(json, pattern);
+   if(pos < 0) return "";
+   
+   pos += StringLen(pattern);
+   
+   // Skip whitespace
+   while(pos < StringLen(json) && (StringGetCharacter(json, pos) == ' ' || StringGetCharacter(json, pos) == '\t'))
+      pos++;
+   
+   // Expect opening quote
+   if(pos >= StringLen(json) || StringGetCharacter(json, pos) != '"')
+      return "";
+   pos++;  // Skip opening quote
+   
+   // Find closing quote
+   int endPos = StringFind(json, "\"", pos);
+   if(endPos < 0) return "";
+   
+   return StringSubstr(json, pos, endPos - pos);
+}
+
+//+------------------------------------------------------------------+
+//| Extract JSON double value (handles spaces after colon)           |
+//+------------------------------------------------------------------+
+double ExtractJsonDouble(string json, string fieldName)
+{
+   string pattern = "\"" + fieldName + "\":";
+   int pos = StringFind(json, pattern);
+   if(pos < 0) return 0.0;
+   
+   pos += StringLen(pattern);
+   
+   // Skip whitespace
+   while(pos < StringLen(json) && (StringGetCharacter(json, pos) == ' ' || StringGetCharacter(json, pos) == '\t'))
+      pos++;
+   
+   // Find end of number (comma, }, or whitespace)
+   int endPos = pos;
+   while(endPos < StringLen(json))
+   {
+      ushort c = StringGetCharacter(json, endPos);
+      if(c == ',' || c == '}' || c == ' ' || c == '\n' || c == '\r')
+         break;
+      endPos++;
+   }
+   
+   string numStr = StringSubstr(json, pos, endPos - pos);
+   return StringToDouble(numStr);
+}
+
+//+------------------------------------------------------------------+
+//| Extract JSON boolean value (handles spaces after colon)          |
+//+------------------------------------------------------------------+
+bool ExtractJsonBool(string json, string fieldName)
+{
+   string pattern = "\"" + fieldName + "\":";
+   int pos = StringFind(json, pattern);
+   if(pos < 0) return false;
+   
+   pos += StringLen(pattern);
+   
+   // Skip whitespace
+   while(pos < StringLen(json) && (StringGetCharacter(json, pos) == ' ' || StringGetCharacter(json, pos) == '\t'))
+      pos++;
+   
+   // Check for "true"
+   if(StringSubstr(json, pos, 4) == "true")
+      return true;
+   
+   return false;
+}
+
+//+------------------------------------------------------------------+
+//| Extract string value from JSON (legacy)                          |
 //+------------------------------------------------------------------+
 string ExtractString(string json, string key, string terminator)
 {
@@ -884,7 +938,7 @@ string ExtractModelPredictions(string response)
 //+------------------------------------------------------------------+
 //| Execute trade based on prediction                                |
 //+------------------------------------------------------------------+
-void ExecuteTrade(int prediction, double confidence)
+void ExecuteTrade(int prediction, double confidence, double positionSizePct = 1.0)
 {
    // Check if symbol is allowed for trading
    if(!IsSymbolAllowed())
@@ -933,8 +987,48 @@ void ExecuteTrade(int prediction, double confidence)
       return;
    }
    
-   // Close opposite positions first
-   CloseOppositePositions(prediction);
+   // REMOVED: Don't close opposite positions automatically
+   // Let existing trades run to SL/TP - prevents greedy churning
+   // CloseOppositePositions(prediction);  // DISABLED
+   
+   // Check if we already have ANY position open (prevents overtrading)
+   int totalPositions = 0;
+   int buyPositions = 0;
+   int sellPositions = 0;
+   
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      if(PositionSelectByTicket(PositionGetTicket(i)))
+      {
+         if(PositionGetString(POSITION_SYMBOL) == _Symbol && 
+            PositionGetInteger(POSITION_MAGIC) == inpMagic)
+         {
+            totalPositions++;
+            ENUM_POSITION_TYPE posType = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+            if(posType == POSITION_TYPE_BUY) buyPositions++;
+            if(posType == POSITION_TYPE_SELL) sellPositions++;
+         }
+      }
+   }
+   
+   // Block if we already have max positions (2 per day: 1 BUY + 1 SELL)
+   if(totalPositions >= 2)
+   {
+      Print("⚠️ TRADE BLOCKED: Already have ", totalPositions, " positions open (max 2)");
+      return;
+   }
+   
+   // Block if we already have a position in this direction
+   if(prediction == 1 && buyPositions > 0)
+   {
+      Print("⚠️ TRADE BLOCKED: Already have BUY position open - let it run");
+      return;
+   }
+   if(prediction == -1 && sellPositions > 0)
+   {
+      Print("⚠️ TRADE BLOCKED: Already have SELL position open - let it run");
+      return;
+   }
    
    // CRITICAL: Double-check for existing positions of same type
    // This prevents race conditions when EA runs frequently
@@ -976,6 +1070,12 @@ void ExecuteTrade(int prediction, double confidence)
    
    // Calculate position size based on confidence, regime and recovery
    double lots = ComputeLotSize(prediction, confidence);
+   
+   // Apply server's position size multiplier (based on quality score)
+   lots *= positionSizePct;
+   
+   if(ShowDebugInfo && positionSizePct != 1.0)
+      PrintFormat("📊 Position size adjusted by server: %.2f × %.0f%% = %.2f", lots / positionSizePct, positionSizePct * 100, lots);
    
    // Normalize lot size
    double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
@@ -1446,19 +1546,31 @@ bool HasPosition(int prediction)
 }
 
 //+------------------------------------------------------------------+
-//| Close opposite positions                                         |
+//| Close opposite positions (DISABLED - causes greedy churning)     |
 //+------------------------------------------------------------------+
+// This function is DISABLED to prevent the EA from closing existing
+// positions when an opposing signal comes. Let trades run to SL/TP.
+// The EA now allows max 1 BUY + 1 SELL open at a time (2 total).
 void CloseOppositePositions(int prediction)
 {
+   // DISABLED: Don't close opposite positions automatically
+   // This was causing greedy behavior where the EA would:
+   // 1. Open SELL
+   // 2. Get BUY signal → Close SELL, Open BUY
+   // 3. Get SELL signal → Close BUY, Open SELL
+   // ...churning trades and losing on spreads
+   
+   // If you want to re-enable this, uncomment the code below:
+   /*
    for(int i = PositionsTotal() - 1; i >= 0; i--)
    {
       if(PositionSelectByTicket(PositionGetTicket(i)))
       {
-         if(PositionGetString(POSITION_SYMBOL) == _Symbol)
+         if(PositionGetString(POSITION_SYMBOL) == _Symbol && 
+            PositionGetInteger(POSITION_MAGIC) == inpMagic)
          {
             ENUM_POSITION_TYPE posType = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
             
-            // FIXED: Correct mapping (server sends 1=BUY, -1=SELL, 0=HOLD)
             bool shouldClose = false;
             if(prediction == 1 && posType == POSITION_TYPE_SELL)
                shouldClose = true;
@@ -1485,6 +1597,7 @@ void CloseOppositePositions(int prediction)
          }
       }
    }
+   */
 }
 
 //+------------------------------------------------------------------+
@@ -1707,15 +1820,13 @@ string ExtractIndicators(string response)
 //| Color Scheme:                                                    |
 //|   🟢 BUY      = Bright Green (High confidence bullish signal)   |
 //|   🔴 SELL     = Bright Red (High confidence bearish signal)      |
-//|   🟠 HOLD     = Orange (Neutral/no clear direction)             |
 //|   🔵 SKIP     = Blue (Below minimum confidence threshold)       |
 //+------------------------------------------------------------------+
-void DisplayPredictionInfo(string predLabel, double confidence, double prob_sell, double prob_hold, double prob_buy)
+void DisplayPredictionInfo(string predLabel, double confidence, double prob_sell, double prob_buy)
 {
-   // Color scheme implementation
+   // Color scheme implementation (binary: BUY/SELL only)
    // BUY = Bright Green (clrLime)
    // SELL = Red (clrRed) 
-   // HOLD = Orange (clrOrange)
    // Below Confidence = Blue (clrDodgerBlue)
    
    color predColor = clrDodgerBlue;
@@ -1726,7 +1837,7 @@ void DisplayPredictionInfo(string predLabel, double confidence, double prob_sell
       else if(predLabel == "SELL")
          predColor = clrRed;            // Red
       else
-         predColor = clrOrange;          // Orange (HOLD)
+         predColor = clrOrange;          // Orange (quality filtered)
    }
    else
    {
@@ -1831,19 +1942,12 @@ void DisplayPredictionInfo(string predLabel, double confidence, double prob_sell
       sellBar += (i < sellBars) ? "█" : "░";
    comment += "🔴 SELL:  " + StringFormat("%5.1f%%", prob_sell * 100) + " [" + sellBar + "]\n";
    
-   // HOLD probability with bar
-   string holdBar = "";
-   int holdBars = (int)MathRound(prob_hold * 20);
-   for(int i = 0; i < 20; i++)
-      holdBar += (i < holdBars) ? "█" : "░";
-   comment += "🟠 HOLD:  " + StringFormat("%5.1f%%", prob_hold * 100) + " [" + holdBar + "]\n";
-   
-   // BUY probability with bar
+   // BUY probability with bar (binary classification - no HOLD)
    string buyBar = "";
    int buyBars = (int)MathRound(prob_buy * 20);
    for(int i = 0; i < 20; i++)
       buyBar += (i < buyBars) ? "█" : "░";
-   comment += "🟢 BUY:   " + StringFormat("%5.1f%%", prob_buy * 100) + " [" + buyBar + "]\n";
+   comment += "� BUY:   "  + StringFormat("%5.1f%%", prob_buy * 100) + " [" + buyBar + "]\n";
    comment += "\n";
    
    comment += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n";
@@ -2311,65 +2415,20 @@ bool IsGoodTradingCondition()
 
 
 //+------------------------------------------------------------------+
-//| Check for exit signals on open positions                         |
+//| Check for exit signals on open positions (DISABLED)              |
 //+------------------------------------------------------------------+
+// This function is DISABLED to prevent greedy churning.
+// Let trades run to their SL/TP instead of closing on opposing signals.
 void CheckExitSignals(int prediction, double confidence)
 {
-   for(int i = PositionsTotal() - 1; i >= 0; i--)
-   {
-      if(PositionSelectByTicket(PositionGetTicket(i)))
-      {
-         if(PositionGetString(POSITION_SYMBOL) == _Symbol)
-         {
-            ENUM_POSITION_TYPE posType = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
-            ulong ticket = PositionGetInteger(POSITION_TICKET);
-            
-            bool shouldExit = false;
-            string exitReason = "";
-            
-            // FIXED: Correct mapping (server sends 1=BUY, -1=SELL, 0=HOLD)
-            // Exit long if strong SELL signal
-            if(posType == POSITION_TYPE_BUY && prediction == -1 && confidence >= 0.60)
-            {
-               shouldExit = true;
-               exitReason = "AI Exit: Strong SELL signal";
-            }
-            
-            // Exit short if strong BUY signal
-            if(posType == POSITION_TYPE_SELL && prediction == 1 && confidence >= 0.60)
-            {
-               shouldExit = true;
-               exitReason = "AI Exit: Strong BUY signal";
-            }
-            
-            if(shouldExit)
-            {
-               MqlTradeRequest request = {};
-               MqlTradeResult result = {};
-               ConfigureTradeRequest(request);
-               
-               request.action = TRADE_ACTION_DEAL;
-               request.position = ticket;
-               request.symbol = _Symbol;
-               request.volume = PositionGetDouble(POSITION_VOLUME);
-               request.deviation = 10;
-               request.type = (posType == POSITION_TYPE_BUY) ? ORDER_TYPE_SELL : ORDER_TYPE_BUY;
-               request.price = (posType == POSITION_TYPE_BUY) ? 
-                  SymbolInfoDouble(_Symbol, SYMBOL_BID) : 
-                  SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-               
-               if(OrderSend(request, result))
-               {
-                  Print("✅ ", exitReason, " - Ticket: ", ticket);
-                  LogTrade("EXIT_" + (posType == POSITION_TYPE_BUY ? "BUY" : "SELL"), 
-                          confidence, request.price, 0, 0);
-                 // Bookkeeping: assume exit was taken; we can't know pnl here without OnTradeTransaction
-                 consecutiveLosses = MathMax(0, consecutiveLosses - 1); // conservatively reduce recovery
-               }
-            }
-         }
-      }
-   }
+   // DISABLED: Don't exit positions on opposing signals
+   // This was causing the EA to churn trades:
+   // 1. Open SELL -> Get BUY signal -> Close SELL
+   // 2. Open BUY -> Get SELL signal -> Close BUY
+   // ...losing money on spreads
+   
+   // Let the trailing stop and SL/TP handle exits instead.
+   return;
 }
 
 // Placeholder: this should be hooked to OnTradeTransaction to get actual closed trade pnl
@@ -2694,5 +2753,5 @@ void DrawOrderBlockZones(string response)
 }
 
 
-//+------------------------------------------------------------------+
-*/
+//+-----------------------------------------------------------------
+-+

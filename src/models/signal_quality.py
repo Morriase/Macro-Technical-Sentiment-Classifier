@@ -1,6 +1,11 @@
 """
 Signal Quality Scoring with Fuzzy Logic
 Evaluates prediction confidence and market conditions
+
+Updated for 7-feature ZigZag model:
+- rsi_norm, macd_diff_norm, candle_body_norm
+- rsi_velocity, macd_velocity
+- yield_curve, dxy_index
 """
 import numpy as np
 import pandas as pd
@@ -10,7 +15,9 @@ from typing import Dict, Tuple
 class SignalQualityScorer:
     """
     Fuzzy logic-based signal quality assessment
-    Combines prediction confidence with market regime indicators
+    Combines prediction confidence with feature-based indicators
+    
+    Adapted for the simplified 7-feature model.
     """
 
     def __init__(self):
@@ -26,7 +33,7 @@ class SignalQualityScorer:
         Calculate signal quality score (0-100)
 
         Args:
-            prediction_proba: [P(Sell), P(Buy)]
+            prediction_proba: [P(Sell), P(Buy)] - binary classification
             features: Feature values for this prediction
             predicted_class: 0=Sell, 1=Buy
 
@@ -35,19 +42,19 @@ class SignalQualityScorer:
         """
         components = {}
 
-        # 1. Confidence Score (0-40 points)
+        # 1. Confidence Score (0-50 points) - increased weight for binary model
         max_prob = np.max(prediction_proba)
-        components['confidence'] = self._fuzzy_confidence(max_prob) * 40
+        components['confidence'] = self._fuzzy_confidence(max_prob) * 50
 
-        # 2. Trend Alignment (0-25 points)
-        components['trend'] = self._fuzzy_trend_alignment(
+        # 2. RSI Alignment (0-20 points)
+        components['rsi'] = self._fuzzy_rsi_alignment(
             features, predicted_class
-        ) * 25
-
-        # 3. Volatility Regime (0-20 points)
-        components['volatility'] = self._fuzzy_volatility_regime(
-            features
         ) * 20
+
+        # 3. MACD Alignment (0-15 points)
+        components['macd'] = self._fuzzy_macd_alignment(
+            features, predicted_class
+        ) * 15
 
         # 4. Momentum Confirmation (0-15 points)
         components['momentum'] = self._fuzzy_momentum_confirmation(
@@ -62,113 +69,143 @@ class SignalQualityScorer:
     def _fuzzy_confidence(self, prob: float) -> float:
         """
         Fuzzy membership for prediction confidence
+        Adjusted for binary classification (typically higher confidence)
+        
         Returns: 0.0 to 1.0
         """
-        if prob > 0.85:
+        if prob > 0.80:
             return 1.0  # Very high confidence
-        elif prob > 0.75:
-            return 0.8  # High confidence
-        elif prob > 0.65:
-            return 0.6  # Medium confidence
+        elif prob > 0.70:
+            return 0.85  # High confidence
+        elif prob > 0.60:
+            return 0.7  # Medium-high confidence
         elif prob > 0.55:
-            return 0.4  # Low confidence
+            return 0.5  # Medium confidence
+        elif prob > 0.52:
+            return 0.35  # Low confidence
         else:
-            return 0.2  # Very low confidence
+            return 0.2  # Very low confidence (near 50/50)
 
-    def _fuzzy_trend_alignment(
+    def _fuzzy_rsi_alignment(
         self, features: pd.Series, predicted_class: int
     ) -> float:
         """
-        Check if prediction aligns with trend indicators
+        Check if RSI aligns with prediction direction
+        Uses rsi_norm which is (RSI - 50) / 50, so range is [-1, 1]
         """
-        score = 0.0
+        if 'rsi_norm' not in features:
+            return 0.5  # Neutral if no RSI data
 
-        # EMA alignment
-        if 'ema_50' in features and 'ema_200' in features and 'close' in features:
-            price = features['close']
-            ema_50 = features['ema_50']
-            ema_200 = features['ema_200']
+        rsi_norm = features['rsi_norm']
+        
+        # rsi_norm > 0 means RSI > 50 (bullish)
+        # rsi_norm < 0 means RSI < 50 (bearish)
+        
+        if predicted_class == 1:  # Buy
+            if rsi_norm > 0.2:  # RSI > 60, strong bullish
+                return 0.9
+            elif rsi_norm > 0:  # RSI > 50, mild bullish
+                return 0.7
+            elif rsi_norm > -0.4:  # RSI 30-50, potential reversal
+                return 0.5
+            else:  # RSI < 30, oversold - could be good for buy
+                return 0.6
+                
+        else:  # Sell (predicted_class == 0)
+            if rsi_norm < -0.2:  # RSI < 40, strong bearish
+                return 0.9
+            elif rsi_norm < 0:  # RSI < 50, mild bearish
+                return 0.7
+            elif rsi_norm < 0.4:  # RSI 50-70, potential reversal
+                return 0.5
+            else:  # RSI > 70, overbought - could be good for sell
+                return 0.6
 
-            # Bullish alignment
-            if predicted_class == 1:  # Buy
-                if price > ema_50 > ema_200:
-                    score += 0.5  # Strong bullish trend
-                elif price > ema_50:
-                    score += 0.3  # Weak bullish trend
+        return 0.5
 
-            # Bearish alignment
-            elif predicted_class == 0:  # Sell
-                if price < ema_50 < ema_200:
-                    score += 0.5  # Strong bearish trend
-                elif price < ema_50:
-                    score += 0.3  # Weak bearish trend
-
-        # MACD confirmation
-        if 'macd' in features and 'macd_signal' in features:
-            macd = features['macd']
-            signal = features['macd_signal']
-
-            if predicted_class == 1 and macd > signal:  # Buy + bullish MACD
-                score += 0.3
-            elif predicted_class == 0 and macd < signal:  # Sell + bearish MACD
-                score += 0.3
-
-        return min(1.0, score)
-
-    def _fuzzy_volatility_regime(self, features: pd.Series) -> float:
+    def _fuzzy_macd_alignment(
+        self, features: pd.Series, predicted_class: int
+    ) -> float:
         """
-        Assess volatility regime (lower volatility = higher quality)
+        Check if MACD aligns with prediction direction
+        Uses macd_diff_norm which is normalized MACD histogram
         """
-        if 'atr_zscore' not in features:
-            return 0.5  # Neutral if no ATR data
+        if 'macd_diff_norm' not in features:
+            return 0.5  # Neutral if no MACD data
 
-        atr_z = features['atr_zscore']
+        macd_diff = features['macd_diff_norm']
+        
+        # macd_diff_norm > 0 means MACD > Signal (bullish)
+        # macd_diff_norm < 0 means MACD < Signal (bearish)
+        
+        if predicted_class == 1:  # Buy
+            if macd_diff > 0.3:
+                return 1.0  # Strong bullish MACD
+            elif macd_diff > 0:
+                return 0.8  # Mild bullish MACD
+            elif macd_diff > -0.3:
+                return 0.4  # Mild bearish (conflicting)
+            else:
+                return 0.2  # Strong bearish (conflicting)
+                
+        else:  # Sell
+            if macd_diff < -0.3:
+                return 1.0  # Strong bearish MACD
+            elif macd_diff < 0:
+                return 0.8  # Mild bearish MACD
+            elif macd_diff < 0.3:
+                return 0.4  # Mild bullish (conflicting)
+            else:
+                return 0.2  # Strong bullish (conflicting)
 
-        if atr_z < 0.5:
-            return 1.0  # Very low volatility (best)
-        elif atr_z < 1.0:
-            return 0.8  # Low volatility (good)
-        elif atr_z < 1.5:
-            return 0.6  # Normal volatility (ok)
-        elif atr_z < 2.0:
-            return 0.3  # High volatility (risky)
-        else:
-            return 0.1  # Very high volatility (very risky)
+        return 0.5
 
     def _fuzzy_momentum_confirmation(
         self, features: pd.Series, predicted_class: int
     ) -> float:
         """
-        Check if momentum indicators confirm the prediction
+        Check if velocity features confirm the prediction direction
+        Uses rsi_velocity and macd_velocity
         """
-        score = 0.0
-
-        # RSI confirmation
-        if 'rsi_14' in features:
-            rsi = features['rsi_14']
-
+        score = 0.5  # Start neutral
+        
+        # RSI velocity (rate of change of RSI)
+        if 'rsi_velocity' in features:
+            rsi_vel = features['rsi_velocity']
+            
             if predicted_class == 1:  # Buy
-                if 30 < rsi < 70:  # Not overbought
-                    score += 0.5
-                elif rsi < 30:  # Oversold (good for buy)
-                    score += 0.7
+                if rsi_vel > 0.02:  # RSI accelerating up
+                    score += 0.25
+                elif rsi_vel > 0:
+                    score += 0.1
+                elif rsi_vel < -0.02:  # RSI accelerating down (conflicting)
+                    score -= 0.15
+                    
+            else:  # Sell
+                if rsi_vel < -0.02:  # RSI accelerating down
+                    score += 0.25
+                elif rsi_vel < 0:
+                    score += 0.1
+                elif rsi_vel > 0.02:  # RSI accelerating up (conflicting)
+                    score -= 0.15
 
-            elif predicted_class == 0:  # Sell
-                if 30 < rsi < 70:  # Not oversold
-                    score += 0.5
-                elif rsi > 70:  # Overbought (good for sell)
-                    score += 0.7
+        # MACD velocity (rate of change of MACD diff)
+        if 'macd_velocity' in features:
+            macd_vel = features['macd_velocity']
+            
+            if predicted_class == 1:  # Buy
+                if macd_vel > 0.01:  # MACD histogram expanding bullish
+                    score += 0.25
+                elif macd_vel > 0:
+                    score += 0.1
+                    
+            else:  # Sell
+                if macd_vel < -0.01:  # MACD histogram expanding bearish
+                    score += 0.25
+                elif macd_vel < 0:
+                    score += 0.1
 
-        # Stochastic confirmation
-        if 'stoch_k' in features:
-            stoch = features['stoch_k']
-
-            if predicted_class == 1 and stoch < 80:  # Buy + not overbought
-                score += 0.3
-            elif predicted_class == 0 and stoch > 20:  # Sell + not oversold
-                score += 0.3
-
-        return min(1.0, score)
+        return max(0.0, min(1.0, score))
 
     def get_position_size_multiplier(self, quality_score: float) -> float:
         """
@@ -195,22 +232,21 @@ class SignalQualityScorer:
 
 
 if __name__ == "__main__":
-    # Example usage
+    # Example usage with 7-feature model
     scorer = SignalQualityScorer()
 
-    # Mock prediction and features
-    prediction_proba = np.array([0.75, 0.15, 0.10])  # 75% Buy
-    predicted_class = 0  # Buy
+    # Mock prediction and features (7-feature model)
+    prediction_proba = np.array([0.35, 0.65])  # 65% Buy
+    predicted_class = 1  # Buy
 
     features = pd.Series({
-        'close': 1.0500,
-        'ema_50': 1.0480,
-        'ema_200': 1.0450,
-        'atr_zscore': 0.8,
-        'rsi_14': 55,
-        'macd': 0.0005,
-        'macd_signal': 0.0003,
-        'stoch_k': 60
+        'rsi_norm': 0.15,        # RSI ~57.5
+        'macd_diff_norm': 0.2,   # Mild bullish MACD
+        'candle_body_norm': 0.1,
+        'rsi_velocity': 0.01,
+        'macd_velocity': 0.005,
+        'yield_curve': 0.5,
+        'dxy_index': 105.0
     })
 
     quality, components = scorer.calculate_quality(
@@ -219,6 +255,5 @@ if __name__ == "__main__":
 
     print(f"Signal Quality: {quality:.1f}/100")
     print(f"Components: {components}")
-    print(
-        f"Position Size: {scorer.get_position_size_multiplier(quality)*100:.0f}%")
+    print(f"Position Size: {scorer.get_position_size_multiplier(quality)*100:.0f}%")
     print(f"Should Trade: {scorer.should_trade(quality)}")

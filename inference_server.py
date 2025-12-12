@@ -3,36 +3,29 @@ Production Inference Server for Forex Trading Models
 Handles feature engineering, model loading, and predictions
 
 Architecture:
-- EA sends OHLCV data + raw calendar events
+- EA sends OHLCV data (M5, H1, H4)
 - Server engineers features using EXACT training pipeline
 - Server validates features match model schema
 - Server returns predictions with confidence scores
-- Live sentiment from Marketaux API (optional)
 """
 import os
 import gc
-from src.config import MODELS_DIR, CURRENCY_PAIRS, SENTIMENT_EMA_PERIODS, ENABLE_LIVE_SENTIMENT, SENTIMENT_CACHE_MINUTES
-from src.feature_engineering.technical_features import TechnicalFeatureEngineer
-from src.data_acquisition.macro_data import MacroDataAcquisition
-from src.data_acquisition.news_data import NewsDataAcquisition
-from src.data_acquisition.live_news_loader import MarketauxNewsLoader
-from src.feature_engineering.sentiment_features import SentimentAnalyzer
+import sys
+from pathlib import Path
+
+# Add project root FIRST
+project_root = Path(__file__).parent
+sys.path.insert(0, str(project_root))
+
+from src.config import MODELS_DIR, CURRENCY_PAIRS
+from src.feature_engineering.technical_features import engineer_simplified_zigzag_features
 from src.models.hybrid_ensemble import HybridEnsemble
 from flask import Flask, request, jsonify
 import numpy as np
 import pandas as pd
 import json
-import joblib
-from pathlib import Path
 from loguru import logger
-from datetime import datetime, timedelta
-from typing import Dict
-import sys
-
-# Add project root
-project_root = Path(__file__).parent
-sys.path.insert(0, str(project_root))
-
+from datetime import datetime
 
 app = Flask(__name__)
 
@@ -60,24 +53,7 @@ PAIR_ALIASES = {
 MODELS = {}
 FEATURE_SCHEMAS = {}
 
-# Initialize feature engineers
-try:
-    logger.info("Initializing TechnicalFeatureEngineer...")
-    TECH_ENGINEER = TechnicalFeatureEngineer()
-    logger.info("✓ TechnicalFeatureEngineer initialized")
-except Exception as e:
-    logger.error(f"✗ Failed to initialize TechnicalFeatureEngineer: {e}")
-    raise
-
-try:
-    logger.info("Initializing MacroDataAcquisition...")
-    MACRO_ENGINEER = MacroDataAcquisition()
-    logger.info("✓ MacroDataAcquisition initialized")
-except Exception as e:
-    logger.error(f"✗ Failed to initialize MacroDataAcquisition: {e}")
-    raise
-
-# Initialize FRED Macro Loader for real economic data
+# Initialize FRED Macro Loader for real economic data (with caching)
 FRED_LOADER = None
 try:
     from src.data_acquisition.fred_macro_loader import FREDMacroLoader
@@ -85,9 +61,14 @@ try:
     FRED_LOADER = FREDMacroLoader()
     if FRED_LOADER.api_key:
         logger.info(f"✓ FREDMacroLoader initialized (API key configured)")
+        # Pre-fetch and cache macro features on startup
+        try:
+            yield_curve, dxy_index = FRED_LOADER.get_inference_macro_features()
+            logger.info(f"✓ Cached macro features: yield_curve={yield_curve:.2f}, dxy_index={dxy_index:.2f}")
+        except Exception as e:
+            logger.warning(f"⚠ Failed to pre-cache macro features: {e}")
     else:
-        logger.warning(
-            "⚠ FREDMacroLoader: No API key - will use placeholder macro features")
+        logger.warning("⚠ FREDMacroLoader: No API key - will use cached data or defaults")
 except ImportError:
     logger.warning("⚠ FREDMacroLoader not available")
     FRED_LOADER = None
@@ -95,57 +76,18 @@ except Exception as e:
     logger.warning(f"⚠ FREDMacroLoader error: {e}")
     FRED_LOADER = None
 
-# Initialize Marketaux live news loader for sentiment
-LIVE_NEWS_LOADER = None
-try:
-    logger.info("Initializing MarketauxNewsLoader...")
-    LIVE_NEWS_LOADER = MarketauxNewsLoader()
-    status = LIVE_NEWS_LOADER.get_health_status()
-    if status["api_configured"]:
-        logger.info(f"✓ MarketauxNewsLoader initialized (API key configured)")
-    else:
-        logger.warning(
-            "⚠ MarketauxNewsLoader: No API key - will use neutral sentiment")
-except Exception as e:
-    logger.warning(f"⚠ MarketauxNewsLoader not available: {e}")
-    LIVE_NEWS_LOADER = None
-
-# Only load legacy sentiment components if live sentiment is enabled AND no Marketaux
-if ENABLE_LIVE_SENTIMENT and LIVE_NEWS_LOADER is None:
-    try:
-        logger.info("Initializing NewsDataAcquisition...")
-        NEWS_ACQUIRER = NewsDataAcquisition()
-        logger.info("✓ NewsDataAcquisition initialized")
-
-        logger.info("Initializing SentimentAnalyzer...")
-        SENTIMENT_ANALYZER = SentimentAnalyzer()
-        logger.info("✓ SentimentAnalyzer initialized")
-    except Exception as e:
-        logger.error(f"✗ Failed to initialize sentiment components: {e}")
-        raise
-else:
-    NEWS_ACQUIRER = None
-    SENTIMENT_ANALYZER = None
-    if LIVE_NEWS_LOADER:
-        logger.info("Using Marketaux for live sentiment")
-    else:
-        logger.info("Sentiment analysis disabled")
-
 logger.info("=" * 80)
 logger.info("SERVER INITIALIZATION COMPLETE")
 logger.info("=" * 80)
 
 
 def load_model_and_schema(pair: str):
-    """
-    Load trained model and feature schema for a currency pair
-    """
+    """Load trained model and feature schema for a currency pair"""
     if pair in MODELS:
         return MODELS[pair], FEATURE_SCHEMAS[pair]
 
     logger.info(f"Loading model for {pair}...")
 
-    # Load model (without .pth extension - the save_model method adds suffixes)
     model_path = MODELS_DIR / f"{pair}_model"
     if not Path(f"{model_path}_config.pkl").exists():
         raise FileNotFoundError(f"Model not found for {pair}")
@@ -153,7 +95,6 @@ def load_model_and_schema(pair: str):
     model = HybridEnsemble()
     model.load_model(str(model_path))
 
-    # Load feature schema
     schema_path = MODELS_DIR / f"{pair}_feature_schema.json"
     if not schema_path.exists():
         raise FileNotFoundError(f"Feature schema not found for {pair}")
@@ -161,7 +102,6 @@ def load_model_and_schema(pair: str):
     with open(schema_path, 'r') as f:
         schema = json.load(f)
 
-    # Cache
     MODELS[pair] = model
     FEATURE_SCHEMAS[pair] = schema
 
@@ -169,284 +109,14 @@ def load_model_and_schema(pair: str):
     return model, schema
 
 
-def engineer_features_from_ohlcv(df_m5: pd.DataFrame, df_h1: pd.DataFrame, df_h4: pd.DataFrame, pair: str) -> tuple:
-    """
-    Engineer features from OHLCV data using EXACT training pipeline
-
-    CRITICAL: Must match training exactly (38 features)
-    - 25 base technical features (M5)
-    - 8 multi-timeframe features (H1 + H4)
-    - 5 FRED macro features (rate_differential, vix, yield_curve, dxy_index, oil_price)
-
-    Args:
-        df_m5: M5 OHLCV DataFrame
-        df_h1: H1 OHLCV DataFrame
-        df_h4: H4 OHLCV DataFrame
-        pair: Currency pair
-
-    Returns:
-        df_features: DataFrame with all features
-        feature_cols: List of feature column names
-    """
-    logger.info(
-        f"Engineering features for {pair} from M5={len(df_m5)}, H1={len(df_h1)}, H4={len(df_h4)} candles")
-
-    # Step 1: Base technical features on M5 (~25 features - OPTIMIZED)
-    df_features = TECH_ENGINEER.calculate_all_features(df_m5.copy())
-    logger.info(
-        f"✓ Calculated {len(df_features.columns)} base technical features")
-
-    # Step 2: Multi-timeframe features (8 features - OPTIMIZED: only RSI, ADX, regime)
-    try:
-        higher_timeframes = {
-            'H1': df_h1,
-            'H4': df_h4
-        }
-
-        df_features = TECH_ENGINEER.add_multi_timeframe_features(
-            df_primary=df_features,
-            higher_timeframes=higher_timeframes
-        )
-        logger.info(f"✓ Added multi-timeframe features from real H1 + H4 data")
-    except Exception as e:
-        logger.error(f"Failed to add MTF features: {e}")
-        raise ValueError(f"MTF feature engineering failed: {e}")
-
-    # Step 3: Macro features (FRED ONLY)
-    if FRED_LOADER is not None:
-        logger.info(f"Fetching FRED macro features for {pair}...")
-        try:
-            start_date = df_features.index.min().to_pydatetime()
-            end_date = df_features.index.max().to_pydatetime()
-
-            fred_macro_df = FRED_LOADER.get_macro_features_for_pair(
-                pair, start_date, end_date
-            )
-
-            if not fred_macro_df.empty:
-                key_fred_features = ['rate_differential', 'vix',
-                                     'yield_curve', 'dxy_index', 'oil_price']
-                selected_cols = [
-                    'date'] + [col for col in key_fred_features if col in fred_macro_df.columns]
-                fred_macro_df = fred_macro_df[selected_cols]
-
-                original_index_name = df_features.index.name or 'date'
-                df_features = df_features.reset_index()
-
-                if original_index_name != 'date' and original_index_name in df_features.columns:
-                    df_features = df_features.rename(
-                        columns={original_index_name: 'date'})
-
-                df_features['date'] = pd.to_datetime(
-                    df_features['date']).dt.date
-                fred_macro_df['date'] = pd.to_datetime(
-                    fred_macro_df['date']).dt.date
-
-                df_features = pd.merge(
-                    df_features, fred_macro_df, on='date', how='left')
-
-                macro_cols = [
-                    col for col in fred_macro_df.columns if col != 'date']
-                for col in macro_cols:
-                    if col in df_features.columns:
-                        df_features[col] = df_features[col].ffill().fillna(0)
-
-                df_features['date'] = pd.to_datetime(df_features['date'])
-                df_features = df_features.set_index('date')
-                logger.success(
-                    f"✓ Added {len(macro_cols)} FRED macro features")
-            else:
-                logger.warning(
-                    "No FRED macro data available - adding placeholders")
-                for col in ['rate_differential', 'vix', 'yield_curve', 'dxy_index', 'oil_price']:
-                    df_features[col] = 0.0
-        except Exception as e:
-            logger.warning(f"⚠ Failed to fetch FRED macro features: {e}")
-            for col in ['rate_differential', 'vix', 'yield_curve', 'dxy_index', 'oil_price']:
-                df_features[col] = 0.0
-    else:
-        logger.warning("No FRED loader available - adding placeholders")
-        for col in ['rate_differential', 'vix', 'yield_curve', 'dxy_index', 'oil_price']:
-            df_features[col] = 0.0
-
-    # Drop NaN
-    initial_len = len(df_features)
-    df_features.dropna(inplace=True)
-    logger.info(f"Dropped {initial_len - len(df_features)} rows with NaNs")
-
-    # Extract feature columns (SAME LOGIC AS TRAINING)
-    exclude_cols = [
-        "open", "high", "low", "close", "volume",
-        "forward_close", "forward_return", "forward_return_pips",
-        "target", "target_class", "timestamp", "date"
-    ]
-
-    feature_cols = [
-        col for col in df_features.columns
-        if col not in exclude_cols
-    ]
-
-    logger.success(
-        f"Engineered {len(feature_cols)} features, {len(df_features)} samples after dropna")
-
-    return df_features, feature_cols
-
-
-def validate_features(feature_names: list, schema: dict, pair: str):
-    """
-    Validate that engineered features match model training schema
-    """
-    expected_features = schema['feature_names']
-    expected_count = schema['n_features']
-
-    if len(feature_names) != expected_count:
-        raise ValueError(
-            f"{pair}: Feature count mismatch! "
-            f"Expected {expected_count}, got {len(feature_names)}"
-        )
-
-    # Check feature names and order
-    mismatches = []
-    for i, (expected, actual) in enumerate(zip(expected_features, feature_names)):
-        if expected != actual:
-            mismatches.append(
-                f"Position {i}: expected '{expected}', got '{actual}'")
-
-    if mismatches:
-        raise ValueError(
-            f"{pair}: Feature order mismatch!\n" + "\n".join(mismatches[:10])
-        )
-
-    logger.success(f"{pair}: Feature validation passed ✓")
-
-
-def get_live_sentiment_features(hours_back: int = 24) -> Dict:
-    """
-    Get live sentiment features from Marketaux API.
-
-    Returns:
-        Dictionary with sentiment features matching training format
-    """
-    if LIVE_NEWS_LOADER is None:
-        logger.debug("No live news loader - returning neutral sentiment")
-        return {
-            "positive": 0.0,
-            "negative": 0.0,
-            "neutral": 1.0,
-            "polarity": 0.0,
-            "article_count": 0,
-            "source": "none"
-        }
-
-    try:
-        sentiment = LIVE_NEWS_LOADER.get_sentiment_features(
-            hours_back=hours_back)
-        sentiment["source"] = "marketaux"
-        return sentiment
-    except Exception as e:
-        logger.error(f"Failed to get live sentiment: {e}")
-        return {
-            "positive": 0.0,
-            "negative": 0.0,
-            "neutral": 1.0,
-            "polarity": 0.0,
-            "article_count": 0,
-            "source": "error"
-        }
-
-
-@app.route('/sentiment', methods=['GET'])
-def get_sentiment():
-    """
-    Get current forex market sentiment from Marketaux API.
-
-    Query parameters:
-        hours_back: Number of hours to look back for news (default: 24)
-
-    Returns:
-        JSON with sentiment features:
-        {
-            "polarity": -1 to 1,
-            "positive": 0 to 1,
-            "negative": 0 to 1,
-            "neutral": 0 to 1,
-            "polarity_ema_3": float,
-            "polarity_ema_7": float,
-            "polarity_ema_14": float,
-            "article_count": int,
-            "source": "marketaux" | "none" | "error",
-            "timestamp": ISO datetime
-        }
-    """
-    try:
-        hours_back = request.args.get('hours_back', 24, type=int)
-        # Limit to 1-168 hours (1 week)
-        hours_back = max(1, min(hours_back, 168))
-
-        sentiment = get_live_sentiment_features(hours_back=hours_back)
-        sentiment["timestamp"] = datetime.now().isoformat()
-
-        # Log for monitoring
-        logger.info(
-            f"Sentiment request: polarity={sentiment.get('polarity', 0):.3f}, "
-            f"articles={sentiment.get('article_count', 0)}, source={sentiment.get('source', 'unknown')}"
-        )
-
-        return jsonify(sentiment)
-
-    except Exception as e:
-        logger.error(f"Sentiment endpoint error: {e}")
-        return jsonify({
-            "error": str(e),
-            "polarity": 0.0,
-            "source": "error",
-            "timestamp": datetime.now().isoformat()
-        }), 500
-
-
-@app.route('/sentiment/status', methods=['GET'])
-def get_sentiment_status():
-    """
-    Get Marketaux API status and usage information.
-
-    Returns:
-        JSON with API health status
-    """
-    if LIVE_NEWS_LOADER is None:
-        return jsonify({
-            "configured": False,
-            "message": "Marketaux API not configured. Set MARKETAUX_API_KEY environment variable."
-        })
-
-    try:
-        status = LIVE_NEWS_LOADER.get_health_status()
-        status["timestamp"] = datetime.now().isoformat()
-        return jsonify(status)
-    except Exception as e:
-        logger.error(f"Sentiment status error: {e}")
-        return jsonify({"error": str(e)}), 500
-
-
 @app.route('/health', methods=['GET'])
-def health_check():
-    """
-    Health check endpoint
-    """
-    # Include sentiment status in health check
-    sentiment_status = "disabled"
-    if LIVE_NEWS_LOADER:
-        status = LIVE_NEWS_LOADER.get_health_status()
-        if status["api_configured"]:
-            sentiment_status = f"enabled ({status['daily_requests_used']}/100 requests used)"
-        else:
-            sentiment_status = "no_api_key"
-
+def health():
+    """Health check endpoint"""
     return jsonify({
         'status': 'healthy',
-        'timestamp': datetime.now().isoformat(),
         'models_loaded': list(MODELS.keys()),
         'supported_pairs': CURRENCY_PAIRS,
-        'sentiment': sentiment_status
+        'fred_available': FRED_LOADER is not None
     })
 
 
@@ -458,44 +128,13 @@ def predict():
     Expected JSON format:
     {
         "pair": "EUR_USD",
-        "ohlcv_m5": [  // M5 candles (250+)
-            {"timestamp": "2025-01-01 00:00:00", "open": 1.1000, "high": 1.1010, "low": 1.0990, "close": 1.1005, "volume": 1000},
-            ...
-        ],
-        "ohlcv_h1": [  // H1 candles (250+)
-            {"timestamp": "2025-01-01 00:00:00", "open": 1.1000, "high": 1.1010, "low": 1.0990, "close": 1.1005, "volume": 1000},
-            ...
-        ],
-        "ohlcv_h4": [  // H4 candles (250+)
-            {"timestamp": "2025-01-01 00:00:00", "open": 1.1000, "high": 1.1010, "low": 1.0990, "close": 1.1005, "volume": 1000},
-            ...
-        ],
-        "events": [  // OPTIONAL: Raw calendar events for macro features
-            {
-                "timestamp": "2025-01-01 14:30:00",
-                "event_name": "NFP",
-                "country": "US",
-                "actual": 150000,
-                "forecast": 180000,
-                "previous": 200000,
-                "impact": "high"
-            }
-        ]
-    }
-
-    Returns:
-    {
-        "pair": "EUR_USD",
-        "prediction": "BUY" | "SELL" | "HOLD",
-        "confidence": 0.85,
-        "probabilities": {"BUY": 0.85, "SELL": 0.10, "HOLD": 0.05},
-        "timestamp": "2025-01-01 00:05:00",
-        "feature_count": 38,  // 25 base + 8 MTF + 5 FRED macro
-        "status": "success"
+        "ohlcv_m5": [ ... ],
+        "ohlcv_h1": [ ... ],   // optional, not used currently
+        "ohlcv_h4": [ ... ],   // optional, not used currently
+        "calendar_events": [ ... ]  // optional, not used currently
     }
     """
     try:
-        # Parse request
         data = request.get_json()
 
         if not data:
@@ -503,192 +142,136 @@ def predict():
 
         pair = data.get('pair')
         ohlcv_m5_data = data.get('ohlcv_m5')
-        ohlcv_h1_data = data.get('ohlcv_h1')
-        ohlcv_h4_data = data.get('ohlcv_h4')
-        events_data = data.get('events', [])  # Optional calendar events
+        
+        if not pair or not ohlcv_m5_data:
+            return jsonify({'error': 'Missing required fields: pair, ohlcv_m5'}), 400
 
-        if not pair or not ohlcv_m5_data or not ohlcv_h1_data or not ohlcv_h4_data:
-            return jsonify({'error': 'Missing required fields: pair, ohlcv_m5, ohlcv_h1, ohlcv_h4'}), 400
-
-        # Resolve pair alias (e.g., BTCUSD → EUR_USD for testing)
+        # Resolve pair alias
         original_pair = pair
         if pair in PAIR_ALIASES:
             pair = PAIR_ALIASES[pair]
-            logger.info(f"Mapping {original_pair} → {pair} (using alias)")
+            logger.info(f"Mapping {original_pair} → {pair}")
 
         if pair not in CURRENCY_PAIRS:
             return jsonify({'error': f'Unsupported pair: {original_pair}'}), 400
 
-        logger.info(
-            f"Prediction request for {original_pair} ({pair}) with M5={len(ohlcv_m5_data)}, H1={len(ohlcv_h1_data)}, H4={len(ohlcv_h4_data)} candles, {len(events_data)} events")
+        logger.info(f"📥 Prediction request: {original_pair} ({pair}) | M5={len(ohlcv_m5_data)} candles")
 
-        # Convert OHLCV to DataFrames
+        # Convert OHLCV to DataFrame
         df_m5 = pd.DataFrame(ohlcv_m5_data)
         df_m5['timestamp'] = pd.to_datetime(df_m5['timestamp'])
         df_m5.set_index('timestamp', inplace=True)
 
-        df_h1 = pd.DataFrame(ohlcv_h1_data)
-        df_h1['timestamp'] = pd.to_datetime(df_h1['timestamp'])
-        df_h1.set_index('timestamp', inplace=True)
-
-        df_h4 = pd.DataFrame(ohlcv_h4_data)
-        df_h4['timestamp'] = pd.to_datetime(df_h4['timestamp'])
-        df_h4.set_index('timestamp', inplace=True)
-
-        # Validate OHLCV data for all timeframes
         required_cols = ['open', 'high', 'low', 'close', 'volume']
+        if any(col not in df_m5.columns for col in required_cols):
+            return jsonify({'error': 'Missing M5 OHLCV columns'}), 400
 
-        for tf_name, df_tf in [('M5', df_m5), ('H1', df_h1), ('H4', df_h4)]:
-            missing_cols = [
-                col for col in required_cols if col not in df_tf.columns]
-            if missing_cols:
-                return jsonify({'error': f'Missing {tf_name} OHLCV columns: {missing_cols}'}), 400
+        if len(df_m5) < 100:
+            return jsonify({'error': f'Insufficient M5 data: need 100+, got {len(df_m5)}'}), 400
 
-            # Check minimum data
-            if len(df_tf) < 250:
-                return jsonify({
-                    'error': f'Insufficient {tf_name} data: need at least 250 candles, got {len(df_tf)}'
-                }), 400
-
-        # Load model and schema
+        # Load model
         model, schema = load_model_and_schema(pair)
 
-        # Engineer features using real M5, H1, and H4 data (38 features total)
-        df_features, feature_names = engineer_features_from_ohlcv(
-            df_m5, df_h1, df_h4, pair)
-
-        # SENTIMENT FEATURES DISABLED
-        # Models were trained WITHOUT sentiment features (news dataset not attached in Kaggle)
-        # DO NOT add sentiment features here - it will cause feature count mismatch!
-        # If you want sentiment, retrain models with news data first.
-        if ENABLE_LIVE_SENTIMENT:
-            logger.warning(
-                "⚠ ENABLE_LIVE_SENTIMENT=True but models not trained with sentiment! "
-                "Ignoring sentiment to match training (38 features)."
-            )
-
-        # Extract final feature array
-        exclude_cols = [
-            "open", "high", "low", "close", "volume",
-            "forward_close", "forward_return", "forward_return_pips",
-            "target", "target_class", "date"  # Exclude 'date' column from sentiment merge
-        ]
-        feature_cols = [
-            col for col in df_features.columns if col not in exclude_cols]
-        feature_array = df_features[feature_cols].values
-
-        # Validate features match training schema
-        validate_features(feature_cols, schema, pair)
-
-        # For LSTM sequences, we need to pass enough samples for sequence creation
-        # The model internally creates sequences from the data
-        # Pass all available samples and the model will predict on the last sequence
-        X_for_prediction = feature_array  # Pass all samples
-
-        # Predict - model returns predictions for all valid sequences
-        # We want the last prediction (most recent)
-        prediction_proba = model.predict_proba(X_for_prediction)
-        prediction_class = model.predict(X_for_prediction)
-
-        # Get the last prediction (most recent sequence)
-        prediction_class = prediction_class[-1]
-        prediction_proba = prediction_proba[-1]
-
-        # Map class to signal
-        # BINARY CLASSIFICATION: 0=SELL, 1=BUY
-        class_map = {0: "SELL", 1: "BUY"}
-        raw_signal = class_map[prediction_class]
-        confidence = float(prediction_proba[prediction_class])
-
-        # Apply fuzzy logic quality scoring (same as training pipeline)
-        from src.models.signal_quality import SignalQualityScorer
-        quality_scorer = SignalQualityScorer()
-
-        # Get the last feature row for quality calculation
-        last_features = df_features.iloc[-1]
-
-        # Calculate quality score
-        quality_score, quality_components = quality_scorer.calculate_quality(
-            prediction_proba=prediction_proba,
-            features=last_features,
-            predicted_class=prediction_class
+        # Feature engineering - pass fred_loader=None to skip slow FRED merge
+        # We add macro features directly after using cached values
+        df_features, feature_cols = engineer_simplified_zigzag_features(
+            df=df_m5,
+            pair=pair,
+            fred_loader=None  # Skip FRED merge, add features directly below
         )
 
-        # Get position size multiplier
-        position_size_pct = quality_scorer.get_position_size_multiplier(
-            quality_score)
-
-        # Apply quality filter (override signal if quality too low)
-        if quality_score < quality_scorer.min_quality_threshold:
-            signal = "HOLD"  # Override to HOLD if quality too low
-            quality_filtered = True
-            logger.warning(
-                f"{original_pair}: Signal {raw_signal} filtered to HOLD due to low quality ({quality_score:.1f}/100)"
-            )
+        # Add macro features directly using cached FRED data
+        if FRED_LOADER:
+            try:
+                yield_curve, dxy_index = FRED_LOADER.get_inference_macro_features()
+                df_features['yield_curve'] = yield_curve
+                df_features['dxy_index'] = dxy_index
+                logger.info(f"  Macro features: yield_curve={yield_curve:.2f}, dxy_index={dxy_index:.2f}")
+            except Exception as e:
+                logger.warning(f"  FRED macro fetch failed: {e}, using defaults")
+                df_features['yield_curve'] = 0.0
+                df_features['dxy_index'] = 100.0
         else:
+            # No FRED loader - use defaults
+            df_features['yield_curve'] = 0.0
+            df_features['dxy_index'] = 100.0
+
+        # Validate features
+        missing = [f for f in schema['feature_names'] if f not in df_features.columns]
+        if missing:
+            return jsonify({'error': f'Missing features: {missing}'}), 500
+
+        feature_array = df_features[schema['feature_names']].values
+
+        # Predict
+        prediction_proba = model.predict_proba(feature_array)
+        prediction_class = model.predict(feature_array)
+
+        last_pred_class = prediction_class[-1]
+        last_pred_proba = prediction_proba[-1]
+
+        class_map = {0: "SELL", 1: "BUY"}
+        raw_signal = class_map.get(last_pred_class, "UNKNOWN")
+        confidence = float(last_pred_proba[last_pred_class])
+
+        # Quality scoring
+        try:
+            from src.models.signal_quality import SignalQualityScorer
+            quality_scorer = SignalQualityScorer()
+            last_features = df_features.iloc[-1]
+            quality_score, quality_components = quality_scorer.calculate_quality(
+                prediction_proba=last_pred_proba,
+                features=last_features,
+                predicted_class=last_pred_class
+            )
+            position_size_pct = quality_scorer.get_position_size_multiplier(quality_score)
+
+            if quality_score < quality_scorer.min_quality_threshold:
+                signal = "HOLD"
+                quality_filtered = True
+            else:
+                signal = raw_signal
+                quality_filtered = False
+        except ImportError:
+            logger.warning("SignalQualityScorer not found, using defaults")
+            quality_score = 50.0
+            quality_components = {}
+            position_size_pct = 1.0
             signal = raw_signal
             quality_filtered = False
 
-        # Prepare response with fuzzy quality metrics
+        # Build response
         response = {
-            'pair': original_pair,  # Return original pair name (e.g., BTCUSD)
-            'model_pair': pair,  # Show which model was used (e.g., EUR_USD)
+            'pair': original_pair,
+            'model_pair': pair,
             'prediction': signal,
-            'raw_prediction': raw_signal,  # Original model prediction before quality filter
+            'raw_prediction': raw_signal,
             'confidence': round(confidence, 4),
             'probabilities': {
-                'BUY': round(float(prediction_proba[1]), 4),
-                'SELL': round(float(prediction_proba[0]), 4),
-                'HOLD': 0.0  # No Hold class in binary model
+                'BUY': round(float(last_pred_proba[1]), 4),
+                'SELL': round(float(last_pred_proba[0]), 4),
             },
-            # Fuzzy quality metrics
             'quality_score': round(quality_score, 2),
-            'quality_components': {
-                'confidence': round(quality_components['confidence'], 2),
-                'trend': round(quality_components['trend'], 2),
-                'volatility': round(quality_components['volatility'], 2),
-                'momentum': round(quality_components['momentum'], 2)
-            },
+            'quality_components': {k: round(v, 2) for k, v in quality_components.items()},
             'position_size_pct': round(position_size_pct, 2),
             'quality_filtered': quality_filtered,
-            'should_trade': quality_scorer.should_trade(quality_score),
-            # Metadata
             'timestamp': df_m5.index[-1].isoformat(),
-            'feature_count': len(feature_names),
-            'candles_m5': len(df_m5),
-            'candles_h1': len(df_h1),
-            'candles_h4': len(df_h4),
+            'feature_count': len(feature_cols),
             'candles_used': len(feature_array),
             'status': 'success'
         }
 
-        # Enhanced logging with quality metrics
-        logger.success(
-            f"{original_pair} ({pair} model): {signal} (confidence: {confidence:.2%}, "
-            f"quality: {quality_score:.1f}/100, position: {position_size_pct*100:.0f}%)"
-        )
+        logger.success(f"📤 {original_pair}: {signal} | conf={confidence:.1%} | quality={quality_score:.0f}/100")
 
-        # Memory cleanup for Render free tier (512MB RAM)
-        # Clear temporary DataFrames and trigger garbage collection
-        del df_m5, df_h1, df_h4, df_features, feature_array
+        del df_m5, df_features, feature_array
         gc.collect()
 
         return jsonify(response)
 
-    except FileNotFoundError as e:
-        logger.error(f"Model not found: {e}")
-        gc.collect()  # Cleanup on error
-        return jsonify({'error': f'Model not found: {str(e)}'}), 404
-
-    except ValueError as e:
-        logger.error(f"Validation error: {e}")
-        gc.collect()  # Cleanup on error
-        return jsonify({'error': f'Validation error: {str(e)}'}), 400
-
     except Exception as e:
-        logger.error(f"Prediction error: {e}")
-        gc.collect()  # Cleanup on error
-        return jsonify({'error': f'Internal error: {str(e)}'}), 500
+        logger.error(f"Prediction error: {e}", exc_info=True)
+        gc.collect()
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/batch_predict', methods=['POST'])
@@ -785,3 +368,4 @@ if __name__ == '__main__':
         debug=False,  # Set to False in production
         threaded=True
     )
+

@@ -578,16 +578,21 @@ class HybridEnsemble:
         self.xgb_base = joblib.load(f"{filepath}_xgb_base.pkl")
 
         # Initialize LSTM and load weights (if LSTM was used during training)
-        lstm_path = Path(f"{filepath}_lstm_base.pth")
-        if lstm_path.exists():
+        # Correctly construct the paths to the actual saved LSTM model weights and scaler files.
+        lstm_model_weights_path = Path(f"{filepath}_lstm_base.pth_lstm.pt")
+        lstm_scaler_path = Path(f"{filepath}_lstm_base.pth_scaler.joblib")
+
+        if lstm_model_weights_path.exists() and lstm_scaler_path.exists():
             input_size = self.xgb_base.n_features_in_
             self.lstm_base = LSTMSequenceModel(
                 input_size=input_size, **self.lstm_params
             )
-            self.lstm_base.load_model(str(lstm_path))
+            # Pass the base path that LSTMSequenceModel.load_model expects.
+            # It will internally append "_lstm.pt" and "_scaler.joblib".
+            self.lstm_base.load_model(f"{filepath}_lstm_base.pth")
         else:
             self.lstm_base = None
-            logger.info("No LSTM model found - using XGBoost-only mode")
+            logger.info("No LSTM model weights or scaler found - using XGBoost-only mode")
 
         # Load meta-classifier
         self.meta_classifier = joblib.load(f"{filepath}_meta.pkl")

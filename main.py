@@ -25,7 +25,7 @@ from src.config import (
 )
 from src.data_acquisition.kaggle_loader import KaggleFXDataLoader
 from src.data_acquisition.news_loader import KaggleNewsLoader
-from src.feature_engineering.technical_features import TechnicalFeatureEngineer
+from src.feature_engineering.technical_features import TechnicalFeatureEngineer, engineer_simplified_zigzag_features
 from src.feature_engineering.sentiment_features import SentimentAnalyzer
 from src.models.hybrid_ensemble import HybridEnsemble
 from src.validation.walk_forward import WalkForwardOptimizer
@@ -212,14 +212,7 @@ class ForexClassifierPipeline:
 
     def engineer_features(self):
         """
-        Step 2: Engineer SIMPLIFIED features (ZigZag approach: 5 features only)
-        
-        Engineer's proven approach: 3 base features + 2 macro features
-        - RSI(12) normalized to [-1, 1]
-        - MACD difference normalized to [-1, 1]
-        - Candlestick body normalized to [-1, 1]
-        - Yield Curve (T10Y2Y)
-        - DXY Index (Dollar strength)
+        Step 2: Engineer simplified features using the centralized pipeline.
         """
         logger.info("="*60)
         logger.info("STEP 2: SIMPLIFIED FEATURE ENGINEERING (ZIGZAG APPROACH)")
@@ -228,146 +221,15 @@ class ForexClassifierPipeline:
         if self.df_price is None:
             raise ValueError("Price data not loaded. Run fetch_data() first.")
 
-        import talib
+        fred_loader = FREDMacroLoader() if HAS_FRED and FREDMacroLoader is not None else None
         
-        # Start with price data
-        self.df_features = self.df_price.copy()
-        
-        logger.info("Calculating 3 base technical features...")
-        
-        # Feature 1: RSI(12) normalized to [-1, 1]
-        self.df_features['rsi_12'] = talib.RSI(self.df_features['close'], timeperiod=12)
-        self.df_features['rsi_norm'] = (self.df_features['rsi_12'] - 50.0) / 50.0
-        
-        # Feature 2: MACD difference (Main - Signal) normalized
-        macd, macd_signal, _ = talib.MACD(
-            self.df_features['close'], 
-            fastperiod=12, 
-            slowperiod=48, 
-            signalperiod=12
+        self.df_features, _ = engineer_simplified_zigzag_features(
+            df=self.df_price,
+            pair=self.currency_pair,
+            fred_loader=fred_loader
         )
-        macd_diff = np.abs(macd - macd_signal)
-        macd_mean = macd_diff.mean()
-        macd_std = macd_diff.std()
-        self.df_features['macd_diff_norm'] = ((macd_diff - macd_mean) / (macd_std * 3)).clip(-1, 1)
         
-        # Feature 3: Candlestick body normalized
-        candle_body = self.df_features['close'] - self.df_features['open']
-        body_mean = candle_body.mean()
-        body_std = candle_body.std()
-        self.df_features['candle_body_norm'] = ((candle_body - body_mean) / (body_std * 3)).clip(-1, 1)
-        
-        logger.success("✓ Calculated 3 base features: RSI, MACD_diff, Candle_body")
-
-        # --- VELOCITY FEATURES ---
-        # Velocity (rate of change) helps LSTM understand momentum, not just position
-        # RSI=70 + velocity=-5 means "overbought but crashing down" (reversal signal)
-        
-        # RSI Velocity: How fast is sentiment changing?
-        self.df_features['rsi_velocity'] = self.df_features['rsi_norm'].diff()
-        
-        # MACD Velocity: Is the trend accelerating or decelerating?
-        self.df_features['macd_velocity'] = self.df_features['macd_diff_norm'].diff()
-        
-        # Fill NaNs created by diff() (first row will be NaN)
-        self.df_features['rsi_velocity'] = self.df_features['rsi_velocity'].fillna(0)
-        self.df_features['macd_velocity'] = self.df_features['macd_velocity'].fillna(0)
-        
-        logger.success("✓ Added 2 velocity features: rsi_velocity, macd_velocity")
-
-        # --- Macro Features (FRED - Only Yield Curve + DXY) ---
-        if HAS_FRED and FREDMacroLoader is not None:
-            logger.info(f"Fetching 2 macro features for {self.currency_pair}...")
-            try:
-                fred_loader = FREDMacroLoader()
-                start_date = self.df_features.index.min()
-                end_date = self.df_features.index.max()
-
-                if isinstance(start_date, pd.Timestamp):
-                    start_date = start_date.to_pydatetime()
-                    end_date = end_date.to_pydatetime()
-
-                fred_macro_df = fred_loader.get_macro_features_for_pair(
-                    self.currency_pair, start_date, end_date
-                )
-
-                if not fred_macro_df.empty:
-                    # Select ONLY the 2 best macro features from analysis
-                    key_fred_features = ['yield_curve', 'dxy_index']
-                    selected_cols = ['date'] + [col for col in key_fred_features if col in fred_macro_df.columns]
-                    fred_macro_df = fred_macro_df[selected_cols]
-
-                    # Merge with price features
-                    # CRITICAL: Preserve original datetime index (with time component)
-                    # Previous bug: converting to .dt.date lost time, making index non-unique
-                    # This caused 80K rows to explode to 7M+ during walk-forward indexing
-                    
-                    # Create a date-only column for merging, but keep original datetime index
-                    self.df_features['_merge_date'] = pd.to_datetime(self.df_features.index).normalize()
-                    fred_macro_df['_merge_date'] = pd.to_datetime(fred_macro_df['date']).dt.normalize()
-                    
-                    # Remove duplicate dates from FRED data
-                    if fred_macro_df['_merge_date'].duplicated().any():
-                        logger.warning(f"⚠ FRED data has {fred_macro_df['_merge_date'].duplicated().sum()} duplicate dates - deduplicating")
-                        fred_macro_df = fred_macro_df.drop_duplicates(subset=['_merge_date'], keep='last')
-                    
-                    # Store original row count to verify merge doesn't explode
-                    original_rows = len(self.df_features)
-                    original_index = self.df_features.index.copy()
-                    
-                    # Reset index for merge, but store original datetime
-                    self.df_features = self.df_features.reset_index()
-                    
-                    # Merge on normalized date
-                    fred_cols = [col for col in fred_macro_df.columns if col not in ['date', '_merge_date']]
-                    fred_for_merge = fred_macro_df[['_merge_date'] + fred_cols]
-                    self.df_features = pd.merge(self.df_features, fred_for_merge, on='_merge_date', how='left')
-                    
-                    # Verify merge didn't create duplicates
-                    if len(self.df_features) != original_rows:
-                        logger.error(f"⚠ MERGE BUG: Row count changed from {original_rows} to {len(self.df_features)}")
-                        raise ValueError(f"Merge created duplicate rows: {original_rows} -> {len(self.df_features)}")
-
-                    # Forward-fill macro features
-                    macro_cols = fred_cols
-                    for col in macro_cols:
-                        if col in self.df_features.columns:
-                            self.df_features[col] = self.df_features[col].ffill().fillna(0)
-
-                    # Restore original datetime index (with time component!)
-                    index_col = self.df_features.columns[0]  # First column after reset_index
-                    self.df_features = self.df_features.set_index(index_col)
-                    self.df_features.index.name = 'date'
-                    
-                    # Clean up merge column
-                    self.df_features = self.df_features.drop(columns=['_merge_date'], errors='ignore')
-
-                    logger.success(f"✓ Added 2 macro features: {', '.join(macro_cols)}")
-                else:
-                    logger.warning("No FRED macro data - adding placeholders")
-                    self.df_features["yield_curve"] = 0.0
-                    self.df_features["dxy_index"] = 100.0
-            except Exception as e:
-                logger.warning(f"⚠ Failed to fetch FRED macro features: {e}")
-                if not isinstance(self.df_features.index, pd.DatetimeIndex):
-                    if 'date' in self.df_features.columns:
-                        self.df_features['date'] = pd.to_datetime(self.df_features['date'])
-                        self.df_features = self.df_features.set_index('date')
-                self.df_features["yield_curve"] = 0.0
-                self.df_features["dxy_index"] = 100.0
-        else:
-            logger.warning("No FRED macro source - using placeholders")
-            self.df_features["yield_curve"] = 0.0
-            self.df_features["dxy_index"] = 100.0
-
-        # --- Final Cleanup ---
-        initial_len = len(self.df_features)
-        self.df_features.dropna(inplace=True)
-        dropped = initial_len - len(self.df_features)
-        
-        logger.info(f"Dropped {dropped} rows with NaNs after feature engineering")
-        logger.success(f"✓ SIMPLIFIED FEATURES READY: 7 features, {len(self.df_features):,} samples")
-        logger.info(f"  Features: rsi_norm, macd_diff_norm, candle_body_norm, rsi_velocity, macd_velocity, yield_curve, dxy_index")
+        logger.success(f"✓ SIMPLIFIED FEATURES READY: {len(self.df_features):,} samples")
 
     def create_target(
         self,

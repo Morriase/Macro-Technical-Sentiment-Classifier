@@ -216,18 +216,40 @@ class FREDMacroLoader:
         """Get cache file path for a series."""
         return self.cache_dir / f"{series_id}.parquet"
 
-    def _load_from_cache(self, series_id: str) -> Optional[pd.DataFrame]:
-        """Load cached series data if available and recent."""
+    def _load_from_cache(self, series_id: str, max_age_days: int = 7) -> Optional[pd.DataFrame]:
+        """Load cached series data if available.
+        
+        Args:
+            series_id: FRED series ID
+            max_age_days: Maximum cache age in days (default 7 for weekly refresh)
+                         Set to -1 to always use cache regardless of age
+        """
         cache_path = self._get_cache_path(series_id)
         if cache_path.exists():
-            # Check if cache is less than 1 day old
-            cache_age = datetime.now() - datetime.fromtimestamp(cache_path.stat().st_mtime)
-            if cache_age < timedelta(days=1):
-                try:
-                    return pd.read_parquet(cache_path)
-                except Exception as e:
-                    logger.warning(
-                        f"Failed to read cache for {series_id}: {e}")
+            try:
+                cache_age = datetime.now() - datetime.fromtimestamp(cache_path.stat().st_mtime)
+                # If max_age_days is -1, always use cache
+                if max_age_days == -1 or cache_age < timedelta(days=max_age_days):
+                    df = pd.read_parquet(cache_path)
+                    logger.debug(f"Loaded {series_id} from cache (age: {cache_age.days}d)")
+                    return df
+                else:
+                    logger.debug(f"Cache for {series_id} expired ({cache_age.days}d > {max_age_days}d)")
+            except Exception as e:
+                logger.warning(f"Failed to read cache for {series_id}: {e}")
+        return None
+    
+    def _load_from_cache_fallback(self, series_id: str) -> Optional[pd.DataFrame]:
+        """Load cached data regardless of age - used as fallback when API fails."""
+        cache_path = self._get_cache_path(series_id)
+        if cache_path.exists():
+            try:
+                df = pd.read_parquet(cache_path)
+                cache_age = datetime.now() - datetime.fromtimestamp(cache_path.stat().st_mtime)
+                logger.warning(f"Using stale cache for {series_id} (age: {cache_age.days}d) - API failed")
+                return df
+            except Exception as e:
+                logger.error(f"Failed to read fallback cache for {series_id}: {e}")
         return None
 
     def _save_to_cache(self, series_id: str, df: pd.DataFrame):
@@ -243,10 +265,11 @@ class FREDMacroLoader:
         start_date: datetime,
         end_date: datetime,
         frequency: str = "m",  # monthly by default
-        use_cache: bool = True
+        use_cache: bool = True,
+        cache_max_age_days: int = 7
     ) -> pd.DataFrame:
         """
-        Fetch a single FRED series.
+        Fetch a single FRED series with robust caching.
 
         Args:
             series_id: FRED series ID (e.g., "FEDFUNDS", "CPIAUCSL")
@@ -254,25 +277,32 @@ class FREDMacroLoader:
             end_date: End date for observations
             frequency: Aggregation frequency ('d'=daily, 'w'=weekly, 'm'=monthly)
             use_cache: Whether to use cached data
+            cache_max_age_days: Max cache age before refresh (7 = weekly)
 
         Returns:
             DataFrame with 'date' and 'value' columns
         """
-        if not self.api_key:
-            logger.warning(
-                f"No FRED API key - returning empty DataFrame for {series_id}")
-            return pd.DataFrame(columns=["date", "value"])
-
-        # Check cache first
+        # Check cache first (before checking API key)
         if use_cache:
-            cached = self._load_from_cache(series_id)
+            cached = self._load_from_cache(series_id, max_age_days=cache_max_age_days)
             if cached is not None:
                 # Filter to requested date range
                 cached = cached[(cached["date"] >= start_date)
                                 & (cached["date"] <= end_date)]
                 if not cached.empty:
-                    logger.debug(f"Using cached data for {series_id}")
                     return cached
+
+        # No valid cache - need API
+        if not self.api_key:
+            # Try fallback cache (any age)
+            fallback = self._load_from_cache_fallback(series_id)
+            if fallback is not None:
+                fallback = fallback[(fallback["date"] >= start_date)
+                                    & (fallback["date"] <= end_date)]
+                if not fallback.empty:
+                    return fallback
+            logger.warning(f"No FRED API key and no cache for {series_id}")
+            return pd.DataFrame(columns=["date", "value"])
 
         self._rate_limit()
 
@@ -290,14 +320,27 @@ class FREDMacroLoader:
             response = requests.get(self.BASE_URL, params=params, timeout=30)
 
             if response.status_code != 200:
-                logger.error(
-                    f"FRED API error for {series_id}: {response.status_code}")
+                logger.error(f"FRED API error for {series_id}: {response.status_code}")
+                # Try fallback cache
+                fallback = self._load_from_cache_fallback(series_id)
+                if fallback is not None:
+                    fallback = fallback[(fallback["date"] >= start_date)
+                                        & (fallback["date"] <= end_date)]
+                    if not fallback.empty:
+                        return fallback
                 return pd.DataFrame(columns=["date", "value"])
 
             data = response.json()
 
             if "observations" not in data or not data["observations"]:
                 logger.warning(f"No observations found for {series_id}")
+                # Try fallback cache
+                fallback = self._load_from_cache_fallback(series_id)
+                if fallback is not None:
+                    fallback = fallback[(fallback["date"] >= start_date)
+                                        & (fallback["date"] <= end_date)]
+                    if not fallback.empty:
+                        return fallback
                 return pd.DataFrame(columns=["date", "value"])
 
             # Parse observations
@@ -316,9 +359,23 @@ class FREDMacroLoader:
 
         except requests.exceptions.RequestException as e:
             logger.error(f"Network error fetching {series_id}: {e}")
+            # Try fallback cache
+            fallback = self._load_from_cache_fallback(series_id)
+            if fallback is not None:
+                fallback = fallback[(fallback["date"] >= start_date)
+                                    & (fallback["date"] <= end_date)]
+                if not fallback.empty:
+                    return fallback
             return pd.DataFrame(columns=["date", "value"])
         except Exception as e:
             logger.error(f"Error fetching {series_id}: {e}")
+            # Try fallback cache
+            fallback = self._load_from_cache_fallback(series_id)
+            if fallback is not None:
+                fallback = fallback[(fallback["date"] >= start_date)
+                                    & (fallback["date"] <= end_date)]
+                if not fallback.empty:
+                    return fallback
             return pd.DataFrame(columns=["date", "value"])
 
     def get_central_bank_rate(
@@ -433,6 +490,49 @@ class FREDMacroLoader:
 
         result_df = result_df.sort_values("date")
         return result_df
+
+    def get_inference_macro_features(self) -> Tuple[float, float]:
+        """
+        Get the two key macro features for inference: yield_curve and dxy_index.
+        
+        Uses aggressive caching - will use cached values up to 30 days old if API fails.
+        These values change slowly (weekly at most) so stale data is acceptable.
+        
+        Returns:
+            Tuple of (yield_curve, dxy_index)
+            - yield_curve: 10Y-2Y Treasury spread (typically -1.0 to 3.0)
+            - dxy_index: Trade Weighted Dollar Index (typically 90-120)
+        """
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=30)  # Get last 30 days
+        
+        # Fetch yield curve (T10Y2Y)
+        yield_curve_df = self.fetch_series(
+            "T10Y2Y", start_date, end_date, 
+            frequency="d", use_cache=True, cache_max_age_days=30
+        )
+        
+        # Fetch DXY index (DTWEXBGS)
+        dxy_df = self.fetch_series(
+            "DTWEXBGS", start_date, end_date,
+            frequency="d", use_cache=True, cache_max_age_days=30
+        )
+        
+        # Get latest values (or defaults)
+        if not yield_curve_df.empty:
+            yield_curve = float(yield_curve_df.iloc[-1]["value"])
+        else:
+            yield_curve = 0.0  # Neutral default
+            logger.warning("Using default yield_curve=0.0 (no data)")
+        
+        if not dxy_df.empty:
+            dxy_index = float(dxy_df.iloc[-1]["value"])
+        else:
+            dxy_index = 100.0  # Neutral default
+            logger.warning("Using default dxy_index=100.0 (no data)")
+        
+        logger.info(f"Macro features: yield_curve={yield_curve:.2f}, dxy_index={dxy_index:.2f}")
+        return yield_curve, dxy_index
 
     def get_rate_differential(
         self,
