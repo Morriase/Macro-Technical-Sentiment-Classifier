@@ -292,7 +292,8 @@ class LSTMSequenceModel:
         self.is_fitted = False
 
         # Reduced logging for cleaner output
-        # logger.info(f\"LSTM-CNN Hybrid model initialized on {self.device}\")
+        logger.info(f"LSTM-CNN Hybrid model initialized on {self.device}")
+        logger.info(f"Architecture: 2-layer LSTM ({self.hidden_size} units) + CNN ({self.cnn_filters} filters, k={self.kernel_size})")
         # logger.info(f"CUDA available: {USE_CUDA}, Mixed Precision: {self.use_amp}")
         # logger.info(f"Model parameters: {sum(p.numel() for p in self.model.parameters()):,}")
         # if USE_CUDA:
