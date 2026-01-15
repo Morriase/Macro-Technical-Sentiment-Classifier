@@ -106,24 +106,53 @@ class MT5DataAcquisition:
                     count
                 )
             else:
-                # Fetch rates using date range
+                # Fetch rates using date range with yearly chunking to avoid "Invalid params" / timeouts
                 logger.info(
                     f"Fetching {symbol} data from {start_date} to {end_date} ({timeframe})")
-                # Remove microseconds as MT5 may not handle them well
+                
                 start_clean = start_date.replace(microsecond=0)
                 end_clean = end_date.replace(microsecond=0)
+                
+                all_rates = []
+                current_start = start_clean
+                
+                # Chunk by year
+                while current_start < end_clean:
+                    # Define chunk end (start of next year or actual end date)
+                    next_year = current_start.year + 1
+                    chunk_end = datetime(next_year, 1, 1)
+                    if chunk_end > end_clean:
+                        chunk_end = end_clean
+                        
+                    logger.info(f"  Fetching chunk: {current_start.date()} to {chunk_end.date()}")
+                    
+                    chunk_rates = mt5.copy_rates_range(
+                        symbol,
+                        mt5_timeframe,
+                        current_start,
+                        chunk_end,
+                    )
+                    
+                    if chunk_rates is not None and len(chunk_rates) > 0:
+                        all_rates.append(chunk_rates)
+                    else:
+                        logger.warning(f"  No data for chunk {current_start.date()} - {chunk_end.date()}")
+                        # Check specific error
+                        err = mt5.last_error()
+                        if err[0] != 1: # 1 = Success
+                             logger.debug(f"  MT5 Code: {err}")
 
-                rates = mt5.copy_rates_range(
-                    symbol,
-                    mt5_timeframe,
-                    start_clean,
-                    end_clean,
-                )
+                    current_start = chunk_end
+                
+                if not all_rates:
+                    logger.warning(f"No data returned for {symbol}")
+                    return pd.DataFrame()
+                
+                # Concatenate all chunks
+                rates = np.concatenate(all_rates)
 
-            if rates is None or len(rates) == 0:
-                logger.warning(f"No data returned for {symbol}")
-                logger.info(f"MT5 Error: {mt5.last_error()}")
-                return pd.DataFrame()
+            if len(rates) == 0:
+                 return pd.DataFrame()
 
             # Convert to DataFrame
             df = pd.DataFrame(rates)
@@ -131,6 +160,10 @@ class MT5DataAcquisition:
             # Convert timestamp to datetime
             df['time'] = pd.to_datetime(df['time'], unit='s')
             df.set_index('time', inplace=True)
+            
+            # Drop duplicates just in case
+            df = df[~df.index.duplicated(keep='first')]
+            df.sort_index(inplace=True)
 
             # Rename columns to match OANDA format
             df.rename(columns={
