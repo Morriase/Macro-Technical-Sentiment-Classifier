@@ -343,7 +343,12 @@ class WalkForwardOptimizer:
                 "reg_lambda": best_params["reg_lambda"],
                 "random_state": self.splitter.min_train_samples,
             }
-            model = self.model_class(xgb_params=xgb_params)
+            
+            # Use n_folds from WFO config (defaults to 3 for speed)
+            n_folds = self.wfo_config.get("cv_folds", 3)
+            logger.info(f"Initializing HybridEnsemble with {n_folds} folds")
+            
+            model = self.model_class(xgb_params=xgb_params, n_folds=n_folds)
 
             # Generate plot path with fold number if base path provided
             fold_plot_path = None
