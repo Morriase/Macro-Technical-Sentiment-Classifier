@@ -116,11 +116,20 @@ class MT5DataAcquisition:
                 all_rates = []
                 current_start = start_clean
                 
-                # Chunk by year
+                # Chunk logic: Monthly for minute data, Yearly for others to avoid limits
                 while current_start < end_clean:
-                    # Define chunk end (start of next year or actual end date)
-                    next_year = current_start.year + 1
-                    chunk_end = datetime(next_year, 1, 1)
+                    # Determine next chunk end
+                    if timeframe in ["M1", "M5", "M15", "M30"]:
+                        # Monthly chunks for high frequency data (~6-8k bars)
+                        if current_start.month == 12:
+                            chunk_end = datetime(current_start.year + 1, 1, 1)
+                        else:
+                            chunk_end = datetime(current_start.year, current_start.month + 1, 1)
+                    else:
+                        # Yearly chunks for hourly/daily data (~6k bars for H1)
+                        chunk_end = datetime(current_start.year + 1, 1, 1)
+
+                    # Cap at actual end date
                     if chunk_end > end_clean:
                         chunk_end = end_clean
                         
@@ -136,11 +145,14 @@ class MT5DataAcquisition:
                     if chunk_rates is not None and len(chunk_rates) > 0:
                         all_rates.append(chunk_rates)
                     else:
-                        logger.warning(f"  No data for chunk {current_start.date()} - {chunk_end.date()}")
-                        # Check specific error
+                        # Only warn if it's not a generic "no data" (error check)
                         err = mt5.last_error()
                         if err[0] != 1: # 1 = Success
+                             # For debug: log error code
                              logger.debug(f"  MT5 Code: {err}")
+                        
+                        # Don't spam warnings for every empty month (common in old history)
+                        # logger.warning(f"  No data for chunk {current_start.date()} - {chunk_end.date()}")
 
                     current_start = chunk_end
                 
