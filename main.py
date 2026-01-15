@@ -387,7 +387,7 @@ class ForexClassifierPipeline:
     def train_model(
         self,
         use_walk_forward: bool = True,
-        optimize_hyperparams: bool = True,
+        optimize_hyperparams: bool = False,  # Disabled by default for speed
     ):
         """
         Step 4: Train model using walk-forward optimization

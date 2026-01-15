@@ -304,13 +304,30 @@ class WalkForwardOptimizer:
             y_train_opt, y_val = y_train[:-val_size], y_train[-val_size:]
 
             # Hyperparameter optimization (if enabled)
-            if optimize_each_window or best_params is None:
+            if optimize_each_window:
+                logger.info("  Running Hoparameter Optimization (Optuna)...")
                 best_params = self.optimize_hyperparameters(
                     X_train_opt, y_train_opt, X_val, y_val
                 )
+            elif best_params is None:
+                # Use default parameters from config if optimization is disabled
+                logger.info("  Optuna disabled: Using default parameters from config")
+                from src.config import ENSEMBLE_CONFIG
+                defaults = ENSEMBLE_CONFIG["base_learners"]["xgboost"]
+                best_params = {
+                    "learning_rate": defaults.get("learning_rate", 0.05),
+                    "max_depth": defaults.get("max_depth", 6),
+                    "n_estimators": defaults.get("n_estimators", 300),
+                    "subsample": defaults.get("subsample", 0.8),
+                    "colsample_bytree": defaults.get("colsample_bytree", 0.8),
+                    "min_child_weight": defaults.get("min_child_weight", 3),
+                    "gamma": defaults.get("gamma", 0.1),
+                    "reg_alpha": defaults.get("reg_alpha", 0.05),
+                    "reg_lambda": defaults.get("reg_lambda", 1.0),
+                }
 
             # Train final model on full training data
-            logger.info("Training model with optimized parameters")
+            logger.info("Training model with selected parameters")
             # Convert flat params dict to xgb_params structure
             xgb_params = {
                 "objective": "multi:softprob",
