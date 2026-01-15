@@ -49,6 +49,10 @@ class TechnicalFeatureEngineer:
         df = self._calculate_momentum_indicators(df)
         df = self._calculate_volatility_indicators(df)
         df = self._calculate_trend_indicators(df)
+        # New indicators for richness
+        df = self._calculate_additional_momentum(df)
+        df = self._calculate_keltner_channels(df)
+        
         df = self._calculate_lagged_features(df)
         df = self._calculate_returns(df)
 
@@ -192,8 +196,9 @@ class TechnicalFeatureEngineer:
             df["high"], df["low"], df["close"], timeperiod=14)
 
         # Commodity Channel Index
+        cci_period = self.config.get("CCI_PERIOD", 14)
         df["cci"] = talib.CCI(df["high"], df["low"],
-                              df["close"], timeperiod=14)
+                              df["close"], timeperiod=cci_period)
         
         # New Feature: Strong uptrend/downtrend based on ADX and DIs
         # ADX > 25 (configurable threshold) indicates a strong trend
@@ -201,6 +206,76 @@ class TechnicalFeatureEngineer:
         df["strong_uptrend_adx"] = ((df["adx"] > adx_threshold) & (df["plus_di"] > df["minus_di"])).astype(int)
         df["strong_downtrend_adx"] = ((df["adx"] > adx_threshold) & (df["minus_di"] > df["plus_di"])).astype(int)
 
+        # Ichimoku Cloud
+        ichi_params = self.config.get("ICHIMOKU", {"tenkan_period": 9, "kijun_period": 26, "senkou_period": 52})
+        # Tenkan-sen (Conversion Line): (9-period high + 9-period low)/2
+        high_9 = df["high"].rolling(window=ichi_params["tenkan_period"]).max()
+        low_9 = df["low"].rolling(window=ichi_params["tenkan_period"]).min()
+        df["ichi_tenkan"] = (high_9 + low_9) / 2
+
+        # Kijun-sen (Base Line): (26-period high + 26-period low)/2
+        high_26 = df["high"].rolling(window=ichi_params["kijun_period"]).max()
+        low_26 = df["low"].rolling(window=ichi_params["kijun_period"]).min()
+        df["ichi_kijun"] = (high_26 + low_26) / 2
+
+        # Senkou Span A (Leading Span A): (Conversion Line + Base Line)/2
+        df["ichi_senkou_a"] = ((df["ichi_tenkan"] + df["ichi_kijun"]) / 2).shift(ichi_params["kijun_period"])
+
+        # Senkou Span B (Leading Span B): (52-period high + 52-period low)/2
+        high_52 = df["high"].rolling(window=ichi_params["senkou_period"]).max()
+        low_52 = df["low"].rolling(window=ichi_params["senkou_period"]).min()
+        df["ichi_senkou_b"] = ((high_52 + low_52) / 2).shift(ichi_params["kijun_period"])
+
+        # Chikou Span (Lagging Span): Close shifted back 26 periods
+        df["ichi_chikou"] = df["close"].shift(-ichi_params["kijun_period"])
+
+        # Ichimoku Signals
+        # Price > Cloud (Bullish) means Price > max(Span A, Span B)
+        # We check current price vs current cloud (shifted values)
+        # Note: We can't use future Chikou values, so we use current price vs past price for "lagging" concept equivalent
+        df["ichi_trend_bullish"] = ((df["close"] > df["ichi_senkou_a"]) & (df["close"] > df["ichi_senkou_b"])).astype(int)
+        df["ichi_trend_bearish"] = ((df["close"] < df["ichi_senkou_a"]) & (df["close"] < df["ichi_senkou_b"])).astype(int)
+        
+        # TK Cross (Tenkan > Kijun = Bullish)
+        df["ichi_tk_cross"] = np.where(df["ichi_tenkan"] > df["ichi_kijun"], 1, -1)
+
+        return df
+    
+    def _calculate_additional_momentum(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Calculate additional momentum indicators (WillR, ROC)"""
+        
+        # Williams %R
+        willr_period = self.config.get("WILLIAMS_R_PERIOD", 14)
+        df["willr"] = talib.WILLR(df["high"], df["low"], df["close"], timeperiod=willr_period)
+        
+        # Rate of Change (ROC)
+        roc_period = self.config.get("ROC_PERIOD", 12)
+        df["roc"] = talib.ROC(df["close"], timeperiod=roc_period)
+        
+        return df
+
+    def _calculate_keltner_channels(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Calculate Keltner Channels (Volatility)"""
+        keltner_params = self.config.get("KELTNER", {"ema_period": 20, "atr_period": 10, "multiplier": 2})
+        
+        # Middle Line: EMA
+        ema = talib.EMA(df["close"], timeperiod=keltner_params["ema_period"])
+        
+        # ATR for bandwidth
+        atr = talib.ATR(df["high"], df["low"], df["close"], timeperiod=keltner_params["atr_period"])
+        
+        # Upper/Lower Bands
+        df["kc_upper"] = ema + (keltner_params["multiplier"] * atr)
+        df["kc_lower"] = ema - (keltner_params["multiplier"] * atr)
+        df["kc_middle"] = ema
+        
+        # Position within Keltner Channels
+        df["kc_position"] = (df["close"] - df["kc_lower"]) / (df["kc_upper"] - df["kc_lower"])
+        
+        # Squeeze indicator: Bollinger Bands inside Keltner Channels
+        if "bb_upper" in df.columns and "bb_lower" in df.columns:
+            df["squeeze_on"] = ((df["bb_upper"] < df["kc_upper"]) & (df["bb_lower"] > df["kc_lower"])).astype(int)
+            
         return df
 
     def _calculate_lagged_features(self, df: pd.DataFrame) -> pd.DataFrame:

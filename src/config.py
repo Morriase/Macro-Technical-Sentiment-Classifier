@@ -60,6 +60,12 @@ TECHNICAL_INDICATORS = {
     "MACD_PERIODS": {"fastperiod": 12, "slowperiod": 26, "signalperiod": 9},
     "BOLLINGER_PERIOD": 20,
     "BOLLINGER_STD": 2,
+    # New indicators for enhanced richness
+    "ICHIMOKU": {"tenkan_period": 9, "kijun_period": 26, "senkou_period": 52},
+    "KELTNER": {"ema_period": 20, "atr_period": 10, "multiplier": 2},
+    "ROC_PERIOD": 12,
+    "CCI_PERIOD": 14,
+    "WILLIAMS_R_PERIOD": 14,
 }
 
 # Macroeconomic Events Configuration
