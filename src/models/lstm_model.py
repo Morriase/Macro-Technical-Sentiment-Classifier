@@ -391,9 +391,20 @@ class LSTMSequenceModel:
         self.val_accs = []
 
         # Loss and optimizer with L2 regularization
-        # Note: class weights were too aggressive (dropped val_acc to 23%)
-        # Label smoothing alone is sufficient for this imbalance (23/23/53%)
-        criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
+        # Re-enable class weights to combat "Hold" bias (53% of data)
+        # Weights: Buy=3.0, Sell=3.0, Hold=1.0 (penalize missing trades)
+        from src.config import IMBALANCE_CONFIG
+        weights_dict = IMBALANCE_CONFIG.get("cost_sensitive_weights", {"Buy": 3.0, "Sell": 3.0, "Hold": 1.0})
+        # Map to class indices: 0=Buy, 1=Sell, 2=Hold
+        weight_tensor = torch.tensor(
+            [weights_dict["Buy"], weights_dict["Sell"], weights_dict["Hold"]],
+            dtype=torch.float32
+        ).to(self.device)
+        
+        criterion = nn.CrossEntropyLoss(
+            weight=weight_tensor,
+            label_smoothing=0.1
+        )
         
         # Use instance regularization parameters
         l1_lambda = self.l1_lambda
