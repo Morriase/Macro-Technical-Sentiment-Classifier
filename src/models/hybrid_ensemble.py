@@ -72,17 +72,20 @@ class HybridEnsemble:
 
         self.xgb_base = xgb.XGBClassifier(**self.xgb_params)
 
-        # Base Learner 2: LSTM for sequence modeling
+        # Base Learner 2: LSTM-CNN Hybrid for sequence modeling
         self.lstm_params = lstm_params or {
             "sequence_length": 22,  # ~1 month of trading days
-            "hidden_size": 128,
+            "hidden_size": 128,  # Increased for hybrid capacity
             "num_layers": 2,
             "num_classes": 3,
-            "dropout": 0.3,
-            "learning_rate": 0.001,
-            "batch_size": 64,
+            "dropout": 0.2,  # Reduced per research paper
+            "learning_rate": 0.001,  # Paper recommendation
+            "batch_size": 64,  # Paper recommendation
             "epochs": 100,
-            "early_stopping_patience": 10,
+            "early_stopping_patience": 15,  # Increased for hybrid convergence
+            # CNN parameters for hybrid architecture
+            "cnn_filters": 64,
+            "kernel_size": 3,
         }
 
         self.lstm_base = None  # Initialized during fit

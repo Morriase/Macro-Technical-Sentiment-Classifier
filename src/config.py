@@ -114,24 +114,23 @@ ENSEMBLE_CONFIG = {
         },
         "lstm": {
             "sequence_length": 22,  # ~1 month of trading days
-            # Slightly increased from 64 for better capacity (some folds underfit)
-            "hidden_size": 72,
+            # LSTM-CNN Hybrid Architecture (based on research paper)
+            "hidden_size": 128,  # Increased for hybrid model capacity
             "num_layers": 2,
-            # Reduced from 0.55 (was too aggressive, causing inconsistency)
-            "dropout": 0.5,
-            "learning_rate": 0.00025,  # Reduced from 0.0003 for smoother convergence
-            # Increased from 128 for more stable gradients (less spiking)
-            "batch_size": 256,
+            "dropout": 0.2,  # Reduced per research paper (was 0.5)
+            "learning_rate": 0.001,  # Paper recommendation
+            "batch_size": 64,  # Paper recommendation
             "epochs": 100,
-            "early_stopping_patience": 10,  # Increased from 8 for more consistent convergence
-            # Regularization (L2 only for now - simpler and effective)
-            # L1 disabled (can enable later for feature selection)
-            "l1_lambda": 0.0,
-            # Reduced from 1.5e-3 (slightly less aggressive)
-            "l2_lambda": 1.2e-3,
+            "early_stopping_patience": 15,  # Increased for hybrid convergence
+            # Regularization (simplified for hybrid)
+            "l1_lambda": 0.0,  # Disabled for cleaner training
+            "l2_lambda": 1e-3,  # Reduced weight decay
             # Optimizer momentum (Adam parameters)
-            "beta1": 0.9,  # Momentum coefficient (default 0.9)
-            "beta2": 0.999,  # RMSprop coefficient (default 0.999)
+            "beta1": 0.9,
+            "beta2": 0.999,
+            # CNN parameters for hybrid architecture
+            "cnn_filters": 64,  # Number of 1D conv filters
+            "kernel_size": 3,  # Conv kernel size
         },
     },
     "meta_learner": {
@@ -162,8 +161,8 @@ WFO_CONFIG = {
 
 # Hyperparameter Optimization
 OPTUNA_CONFIG = {
-    # Reduced from 8 for faster training (each trial takes ~45min)
-    "n_trials": 5,
+    # Reduced from 5 for faster training (target: <30 min total)
+    "n_trials": 3,
     "timeout": 3600,  # 1 hour
     "n_jobs": -1,
     "optimization_metric": "profit_factor",  # or "sharpe_ratio"

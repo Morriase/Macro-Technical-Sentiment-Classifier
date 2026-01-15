@@ -24,10 +24,20 @@ if str(project_root) not in sys.path:
 # Enable Automatic Mixed Precision (AMP) for faster GPU training
 
 
-class LSTMSequenceClassifier(nn.Module):
+class LSTMCNNHybridClassifier(nn.Module):
     """
-    Two-layer LSTM network for sequence classification
-    Captures temporal dependencies in financial time series
+    Hybrid LSTM-CNN architecture for financial time series classification.
+    
+    Based on research paper "Hybrid Machine Learning Models for Long-Term 
+    Stock Market Forecasting: Integrating Technical Indicators" (Fozap, 2025).
+    
+    Architecture:
+    - CNN Branch: 1D convolutions to extract spatial patterns from technical indicators
+    - LSTM Branch: Captures temporal dependencies in sequential data
+    - Fusion Layer: Combines both outputs for comprehensive prediction
+    
+    This hybrid approach captures both short-term patterns (CNN) and 
+    long-term dependencies (LSTM) for improved forecasting accuracy.
     """
 
     def __init__(
@@ -36,29 +46,59 @@ class LSTMSequenceClassifier(nn.Module):
         hidden_size: int = 128,
         num_layers: int = 2,
         num_classes: int = 3,
-        dropout: float = 0.3,
+        dropout: float = 0.2,
         bidirectional: bool = False,
+        cnn_filters: int = 64,
+        kernel_size: int = 3,
     ):
         """
-        Initialize LSTM classifier
+        Initialize LSTM-CNN Hybrid classifier
 
         Args:
             input_size: Number of input features per timestep
             hidden_size: Number of hidden units in LSTM
             num_layers: Number of LSTM layers
             num_classes: Number of output classes (Buy/Sell/Hold)
-            dropout: Dropout rate for regularization
+            dropout: Dropout rate for regularization (paper recommends 0.2)
             bidirectional: Whether to use bidirectional LSTM
+            cnn_filters: Number of CNN filters for spatial feature extraction
+            kernel_size: CNN kernel size for convolutions
         """
-        super(LSTMSequenceClassifier, self).__init__()
+        super(LSTMCNNHybridClassifier, self).__init__()
 
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.num_layers = num_layers
         self.num_classes = num_classes
         self.bidirectional = bidirectional
+        self.cnn_filters = cnn_filters
 
-        # LSTM layers
+        # ============================================================
+        # CNN Branch: Extract spatial patterns from technical indicators
+        # ============================================================
+        # Input: (batch, seq_len, features) -> permute to (batch, features, seq_len)
+        self.conv1 = nn.Conv1d(
+            in_channels=input_size,
+            out_channels=cnn_filters,
+            kernel_size=kernel_size,
+            padding=kernel_size // 2  # Same padding
+        )
+        self.bn1 = nn.BatchNorm1d(cnn_filters)
+        
+        self.conv2 = nn.Conv1d(
+            in_channels=cnn_filters,
+            out_channels=cnn_filters,
+            kernel_size=kernel_size,
+            padding=kernel_size // 2
+        )
+        self.bn2 = nn.BatchNorm1d(cnn_filters)
+        
+        # Global average pooling to get fixed-size output
+        self.global_pool = nn.AdaptiveAvgPool1d(1)
+        
+        # ============================================================
+        # LSTM Branch: Capture temporal dependencies
+        # ============================================================
         self.lstm = nn.LSTM(
             input_size=input_size,
             hidden_size=hidden_size,
@@ -68,48 +108,82 @@ class LSTMSequenceClassifier(nn.Module):
             bidirectional=bidirectional,
         )
 
-        # Dropout for regularization
-        self.dropout = nn.Dropout(dropout)
+        # ============================================================
+        # Fusion Layer: Combine CNN and LSTM outputs
+        # ============================================================
+        lstm_output_size = hidden_size * 2 if bidirectional else hidden_size
+        fusion_input_size = cnn_filters + lstm_output_size
+        
+        self.fusion = nn.Sequential(
+            nn.Linear(fusion_input_size, 64),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(64, num_classes)
+        )
 
-        # Fully connected output layer
-        fc_input_size = hidden_size * 2 if bidirectional else hidden_size
-        self.fc = nn.Linear(fc_input_size, num_classes)
+        # Dropout for LSTM branch
+        self.dropout = nn.Dropout(dropout)
 
         # Softmax for probabilities
         self.softmax = nn.Softmax(dim=1)
 
     def forward(self, x, return_hidden=False):
         """
-        Forward pass
+        Forward pass through hybrid LSTM-CNN architecture
 
         Args:
             x: Input tensor of shape (batch_size, sequence_length, input_size)
-            return_hidden: Whether to return final hidden state
+            return_hidden: Whether to return final hidden state (for meta-learner)
 
         Returns:
             Logits or (logits, hidden_state) if return_hidden=True
         """
+        # ============================================================
+        # CNN Branch
+        # ============================================================
+        # Permute for Conv1d: (batch, seq_len, features) -> (batch, features, seq_len)
+        x_cnn = x.permute(0, 2, 1)
+        
+        # First conv block
+        x_cnn = self.conv1(x_cnn)
+        x_cnn = self.bn1(x_cnn)
+        x_cnn = torch.relu(x_cnn)
+        
+        # Second conv block
+        x_cnn = self.conv2(x_cnn)
+        x_cnn = self.bn2(x_cnn)
+        x_cnn = torch.relu(x_cnn)
+        
+        # Global average pooling: (batch, filters, seq_len) -> (batch, filters, 1)
+        x_cnn = self.global_pool(x_cnn)
+        cnn_out = x_cnn.squeeze(-1)  # (batch, filters)
+
+        # ============================================================
+        # LSTM Branch
+        # ============================================================
         # LSTM forward pass
-        # lstm_out shape: (batch_size, seq_length, hidden_size * num_directions)
-        # h_n shape: (num_layers * num_directions, batch_size, hidden_size)
-        # c_n shape: (num_layers * num_directions, batch_size, hidden_size)
         lstm_out, (h_n, c_n) = self.lstm(x)
 
         # Get the final hidden state from last layer
         if self.bidirectional:
-            # Concatenate forward and backward hidden states
-            hidden = torch.cat((h_n[-2], h_n[-1]), dim=1)
+            lstm_hidden = torch.cat((h_n[-2], h_n[-1]), dim=1)
         else:
-            hidden = h_n[-1]
+            lstm_hidden = h_n[-1]
 
-        # Apply dropout
-        hidden = self.dropout(hidden)
+        # Apply dropout to LSTM output
+        lstm_hidden = self.dropout(lstm_hidden)
 
-        # Fully connected layer
-        logits = self.fc(hidden)
+        # ============================================================
+        # Fusion: Concatenate CNN and LSTM outputs
+        # ============================================================
+        fused = torch.cat([cnn_out, lstm_hidden], dim=1)
+        
+        # Final classification through fusion layer
+        logits = self.fusion(fused)
 
         if return_hidden:
-            return logits, hidden
+            # Return fused representation for meta-learner
+            return logits, fused
 
         return logits
 
@@ -119,6 +193,10 @@ class LSTMSequenceClassifier(nn.Module):
             logits = self.forward(x)
             probs = self.softmax(logits)
         return probs
+
+
+# Keep LSTMSequenceClassifier as alias for backward compatibility
+LSTMSequenceClassifier = LSTMCNNHybridClassifier
 
 
 class LSTMSequenceModel:
@@ -133,19 +211,22 @@ class LSTMSequenceModel:
         hidden_size: int = 128,
         num_layers: int = 2,
         num_classes: int = 3,
-        dropout: float = 0.3,
+        dropout: float = 0.2,  # Reduced from 0.3 per research paper
         learning_rate: float = 0.001,
         batch_size: int = 64,
         epochs: int = 100,
-        early_stopping_patience: int = 10,
+        early_stopping_patience: int = 15,  # Increased for hybrid model
         device: Optional[str] = None,
-        l1_lambda: float = 1e-5,
-        l2_lambda: float = 2e-3,
+        l1_lambda: float = 0.0,  # Disabled by default
+        l2_lambda: float = 1e-3,  # Reduced for hybrid
         beta1: float = 0.9,
         beta2: float = 0.999,
+        # CNN parameters for hybrid architecture
+        cnn_filters: int = 64,
+        kernel_size: int = 3,
     ):
         """
-        Initialize LSTM sequence model
+        Initialize LSTM-CNN Hybrid sequence model
 
         Args:
             input_size: Number of features per timestep
@@ -153,12 +234,14 @@ class LSTMSequenceModel:
             hidden_size: LSTM hidden units
             num_layers: Number of LSTM layers
             num_classes: Number of output classes
-            dropout: Dropout rate
+            dropout: Dropout rate (paper recommends 0.2)
             learning_rate: Learning rate for optimizer
             batch_size: Training batch size
             epochs: Maximum training epochs
             early_stopping_patience: Patience for early stopping
             device: 'cuda', 'cpu', or None (auto-detect)
+            cnn_filters: Number of CNN filters for spatial feature extraction
+            kernel_size: CNN kernel size for convolutions
         """
         self.input_size = input_size
         self.sequence_length = sequence_length
@@ -176,6 +259,9 @@ class LSTMSequenceModel:
         # Optimizer momentum parameters
         self.beta1 = beta1
         self.beta2 = beta2
+        # CNN parameters
+        self.cnn_filters = cnn_filters
+        self.kernel_size = kernel_size
 
         # Device - use config or auto-detect
         if device is None:
@@ -183,13 +269,15 @@ class LSTMSequenceModel:
         else:
             self.device = torch.device(device)
 
-        # Initialize model
-        self.model = LSTMSequenceClassifier(
+        # Initialize LSTM-CNN Hybrid model
+        self.model = LSTMCNNHybridClassifier(
             input_size=input_size,
             hidden_size=hidden_size,
             num_layers=num_layers,
             num_classes=num_classes,
             dropout=dropout,
+            cnn_filters=cnn_filters,
+            kernel_size=kernel_size,
         ).to(self.device)
 
         # Mixed precision training (for faster GPU training)
@@ -204,7 +292,7 @@ class LSTMSequenceModel:
         self.is_fitted = False
 
         # Reduced logging for cleaner output
-        # logger.info(f"LSTM model initialized on {self.device}")
+        # logger.info(f\"LSTM-CNN Hybrid model initialized on {self.device}\")
         # logger.info(f"CUDA available: {USE_CUDA}, Mixed Precision: {self.use_amp}")
         # logger.info(f"Model parameters: {sum(p.numel() for p in self.model.parameters()):,}")
         # if USE_CUDA:
@@ -593,7 +681,7 @@ class LSTMSequenceModel:
         plt.close()
 
     def save_model(self, filepath: str):
-        """Save model to disk"""
+        """Save LSTM-CNN Hybrid model to disk"""
         torch.save({
             'model_state_dict': self.model.state_dict(),
             'scaler': self.scaler,
@@ -604,12 +692,15 @@ class LSTMSequenceModel:
                 'num_layers': self.num_layers,
                 'num_classes': self.num_classes,
                 'dropout': self.dropout,
+                # CNN parameters for hybrid architecture
+                'cnn_filters': getattr(self, 'cnn_filters', 64),
+                'kernel_size': getattr(self, 'kernel_size', 3),
             },
         }, filepath)
-        logger.info(f"LSTM model saved to {filepath}")
+        logger.info(f"LSTM-CNN Hybrid model saved to {filepath}")
 
     def load_model(self, filepath: str):
-        """Load model from disk"""
+        """Load LSTM-CNN Hybrid model from disk"""
         # PyTorch 2.6+ changed weights_only default to True
         # Set to False to load models with sklearn objects (MinMaxScaler)
         checkpoint = torch.load(
@@ -623,14 +714,19 @@ class LSTMSequenceModel:
         self.num_layers = config['num_layers']
         self.num_classes = config['num_classes']
         self.dropout = config['dropout']
+        # CNN parameters (with defaults for backward compatibility)
+        self.cnn_filters = config.get('cnn_filters', 64)
+        self.kernel_size = config.get('kernel_size', 3)
 
-        # Rebuild model
-        self.model = LSTMSequenceClassifier(
+        # Rebuild hybrid model with CNN parameters
+        self.model = LSTMCNNHybridClassifier(
             input_size=self.input_size,
             hidden_size=self.hidden_size,
             num_layers=self.num_layers,
             num_classes=self.num_classes,
             dropout=self.dropout,
+            cnn_filters=self.cnn_filters,
+            kernel_size=self.kernel_size,
         ).to(self.device)
 
         # Load state
@@ -638,7 +734,7 @@ class LSTMSequenceModel:
         self.scaler = checkpoint['scaler']
         self.is_fitted = True
 
-        logger.info(f"LSTM model loaded from {filepath}")
+        logger.info(f"LSTM-CNN Hybrid model loaded from {filepath}")
 
 
 if __name__ == "__main__":
