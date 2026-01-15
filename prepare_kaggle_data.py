@@ -7,7 +7,7 @@ from src.config import CURRENCY_PAIRS, DATA_DIR
 from src.feature_engineering.sentiment_features import SentimentAnalyzer
 from src.feature_engineering.technical_features import TechnicalFeatureEngineer
 from src.data_acquisition.macro_data import MacroDataAcquisition
-from src.data_acquisition.fx_data import FXDataAcquisition
+from src.data_acquisition.mt5_data import MT5DataAcquisition
 import joblib
 from loguru import logger
 from datetime import datetime, timedelta
@@ -16,15 +16,7 @@ import pandas as pd
 import sys
 from pathlib import Path
 
-# Add project root to path
-project_root = Path(__file__).parent
-if str(project_root) not in sys.path:
-    sys.path.insert(0, str(project_root))
-
-
-# Configure logger
-logger.add("logs/data_preparation.log", rotation="1 day", retention="7 days")
-
+# ... (omitted imports)
 
 class DataPreparationPipeline:
     """
@@ -34,20 +26,18 @@ class DataPreparationPipeline:
     def __init__(
         self,
         currency_pairs: list = None,
-        start_date: str = "2022-01-01",
-        end_date: str = "2024-12-31",
+        start_date: str = "2015-01-01",  # Changed default to 2015
+        end_date: str = "2025-12-31",    # Future-proof default
         output_dir: str = "data/kaggle_dataset",
     ):
         """
         Initialize data preparation pipeline
-
-        Args:
-            currency_pairs: List of currency pairs (default: from config)
-            start_date: Start date for data collection
-            end_date: End date for data collection
-            output_dir: Directory to save processed data
         """
         self.currency_pairs = currency_pairs or CURRENCY_PAIRS
+        # Sanitize pairs for MT5 (remove underscores) if needed
+        self.mt5_pairs = [p.replace("_", "") for p in self.currency_pairs]
+        self.pair_map = dict(zip(self.mt5_pairs, self.currency_pairs)) # MT5 -> Standard
+        
         self.start_date = datetime.strptime(start_date, "%Y-%m-%d")
         self.end_date = datetime.strptime(end_date, "%Y-%m-%d")
         self.output_dir = Path(output_dir)
@@ -60,46 +50,54 @@ class DataPreparationPipeline:
 
     def fetch_fx_data(self):
         """
-        Fetch FX price data for all currency pairs
+        Fetch FX price data for all currency pairs using MT5
         """
         logger.info("=" * 80)
-        logger.info("STEP 1: Fetching FX Price Data")
+        logger.info("STEP 1: Fetching FX Price Data (MT5)")
         logger.info("=" * 80)
 
-        fx_client = FXDataAcquisition()
+        mt5_client = MT5DataAcquisition()
+        if not mt5_client.is_connected:
+            logger.error("MT5 not connected. Please start MetaTrader 5.")
+            return
+
         fx_data_dir = self.output_dir / "fx_data"
         fx_data_dir.mkdir(exist_ok=True)
+        
+        timeframes = ["M5", "H1", "H4"]
 
-        for pair in self.currency_pairs:
-            try:
-                logger.info(f"Fetching data for {pair}...")
+        for mt5_pair in self.mt5_pairs:
+            standard_pair = self.pair_map[mt5_pair] # e.g. EURUSD -> EUR_USD
+            
+            for tf in timeframes:
+                try:
+                    logger.info(f"Fetching data for {standard_pair} ({tf})...")
 
-                # Fetch M5 candles
-                df = fx_client.fetch_oanda_candles(
-                    instrument=pair,
-                    start_date=self.start_date,
-                    end_date=self.end_date,
-                    granularity="M5",
-                )
+                    # Fetch data
+                    df = mt5_client.fetch_historical_data(
+                        symbol=mt5_pair,
+                        start_date=self.start_date,
+                        end_date=self.end_date,
+                        timeframe=tf,
+                    )
 
-                if df.empty:
-                    logger.warning(f"No data fetched for {pair}")
+                    if df.empty:
+                        logger.warning(f"No data fetched for {standard_pair} ({tf})")
+                        continue
+
+                    # Validate data quality (basic check)
+                    logger.info(f"{standard_pair} {tf}: {len(df)} candles")
+
+                    # Save to parquet
+                    filename = fx_data_dir / f"{standard_pair}_{tf}.parquet"
+                    df.to_parquet(filename, compression="gzip")
+                    logger.success(f"Saved {standard_pair} {tf} data to {filename}")
+
+                except Exception as e:
+                    logger.error(f"Error fetching {standard_pair} ({tf}): {e}")
                     continue
-
-                # Validate data quality
-                is_valid, accuracy = fx_client.validate_data_quality(df)
-                logger.info(
-                    f"{pair}: {len(df)} candles, accuracy: {accuracy:.2%}")
-
-                # Save to parquet
-                filename = fx_data_dir / f"{pair}_M5.parquet"
-                df.to_parquet(filename, compression="gzip")
-                logger.success(f"Saved {pair} data to {filename}")
-
-            except Exception as e:
-                logger.error(f"Error fetching {pair}: {e}")
-                continue
-
+        
+        mt5_client.close()
         logger.success(f"FX data collection complete!")
 
     def fetch_macro_events(self):
@@ -162,14 +160,29 @@ class DataPreparationPipeline:
                 # Load FX data
                 fx_file = fx_data_dir / f"{pair}_M5.parquet"
                 if not fx_file.exists():
-                    logger.warning(f"No FX data found for {pair}")
+                    logger.warning(f"No M5 FX data found for {pair}")
                     continue
 
                 logger.info(f"Processing technical features for {pair}...")
                 df = pd.read_parquet(fx_file)
 
-                # Generate features
+                # Generate base features (includes Microstructure features now)
                 features_df = tech_engineer.calculate_all_features(df)
+
+                # Load Higher Timeframes for MTF features
+                higher_timeframes = {}
+                for tf in ["H1", "H4"]:
+                    tf_file = fx_data_dir / f"{pair}_{tf}.parquet"
+                    if tf_file.exists():
+                        logger.info(f"  Loading {tf} data for MTF features...")
+                        higher_timeframes[tf] = pd.read_parquet(tf_file)
+                
+                # Add MTF features if available
+                if higher_timeframes:
+                    features_df = tech_engineer.add_multi_timeframe_features(
+                        df_primary=features_df,
+                        higher_timeframes=higher_timeframes
+                    )
 
                 logger.info(
                     f"{pair}: {len(features_df.columns)} features generated")

@@ -52,6 +52,8 @@ class TechnicalFeatureEngineer:
         # New indicators for richness
         df = self._calculate_additional_momentum(df)
         df = self._calculate_keltner_channels(df)
+        # Microstructure features (User requested)
+        df = self._calculate_microstructure_features(df)
         
         df = self._calculate_lagged_features(df)
         df = self._calculate_returns(df)
