@@ -184,8 +184,43 @@ class DataPreparationPipeline:
                         higher_timeframes=higher_timeframes
                     )
 
+                # --- CORRELATION ANALYSIS & PRUNING (User Request) ---
+                logger.info(f"Performing correlation analysis for {pair}...")
+                
+                # Select numeric columns only
+                numeric_df = features_df.select_dtypes(include=[np.number])
+                
+                # Calculate correlation matrix
+                corr_matrix = numeric_df.corr().abs()
+                
+                # Select upper triangle of correlation matrix
+                upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
+                
+                # Find features with correlation greater than 0.95
+                to_drop = [column for column in upper.columns if any(upper[column] > 0.95)]
+                
+                if to_drop:
+                    logger.warning(f"Pruning {len(to_drop)} features with correlation > 0.95")
+                    
+                    # Save a report of what was dropped
+                    report_path = self.output_dir / f"{pair}_pruned_features.txt"
+                    with open(report_path, "w") as f:
+                        f.write(f"Pruned Features Report for {pair}\n")
+                        f.write(f"Total Features Before: {len(features_df.columns)}\n")
+                        f.write(f"Dropped: {len(to_drop)}\n\n")
+                        for col in to_drop:
+                            correlated_with = upper[col][upper[col] > 0.95].index.tolist()
+                            f.write(f"- {col} <-> {correlated_with}\n")
+                    
+                    logger.info(f"Pruning report saved to {report_path}")
+                    
+                    # Drop the features
+                    features_df.drop(columns=to_drop, inplace=True)
+                else:
+                    logger.info("No highly correlated features found to prune.")
+
                 logger.info(
-                    f"{pair}: {len(features_df.columns)} features generated")
+                    f"{pair}: {len(features_df.columns)} features generated (after pruning)")
 
                 # Save features
                 filename = features_dir / f"{pair}_technical_features.parquet"
